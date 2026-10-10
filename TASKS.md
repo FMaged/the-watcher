@@ -124,12 +124,47 @@ psql as a variable rather than being interpolated into SQL text.
 migration runner, so `MIGRATE_DATABASE_URL` is still unused by the binary. That lands in T1.6
 with the first real tables; until then the files are applied by hand with `psql`.
 
-### [ ] T1.5: Core types
+### [x] T1.5: Core types
 **What:** `Money` (i64 minor units), `TradingDay`, `Ticker`, `Side` in `watcher-core`.
 **Why:** D-3 and `PLAN.md` D20. A float cent error in an append-only ledger cannot be
 corrected, only reversed.
 **How:** No I/O in this crate. `Money` has no `f64` conversion at all, in either direction.
-**Notes:** _(added after implementation)_
+**Notes:** Done. 23 tests, clippy clean at `-D warnings`. Both constraints verified rather
+than asserted: the only `f64` anywhere in the crate is a doc comment explaining its absence,
+and `cargo tree -i` finds no tokio, sqlx or reqwest reachable from `watcher-core`.
+
+**First external dependency: `time` 0.3.55**, with `--no-default-features --features
+std,macros`. The tree is five small crates and no serde. A date type is the one thing here
+worth not hand-rolling — leap years are exactly the logic that looks trivial and is not — and
+a calendar library does no I/O, so it sits inside the crate's rule. `TradingDay` parses and
+formats ISO dates by hand rather than enabling `time`'s `parsing` and `formatting` features,
+which keeps the surface smaller for about fifteen lines of code.
+
+**`Shares` was added, though T1.5's *What* lists only four types.** `PLAN.md` D20 specifies
+`i32` whole shares alongside `i64` money, and splitting them across two tasks would have left
+the ledger's other half undefined. It is signed, because a ledger entry records a movement and
+a sale moves shares out; a *position* being non-negative (F-68, no shorting) is the ledger's
+rule rather than the type's, since it is a fact about the portfolio and not about the number.
+
+**The one real design decision was rounding direction.** `Money::bps_away_from_zero` rounds
+the half-spread **up**, so 5 bps of 24.31 costs 2 cents rather than 1. The spread always moves
+a fill against the portfolio, so rounding it down would let the paper record flatter itself by
+a fraction of a cent on every trade — small, consistent, and in the one direction this product
+cannot afford to be biased. There is a property test asserting a non-zero rate on a positive
+amount never rounds down to nothing.
+
+Two smaller things. `InvalidTicker` carries **no payload**: the rejected string may be model
+output, and an error that echoes untrusted input into a log is how an injection travels (A-4);
+there is a test that `'; DROP TABLE analysis; --` produces a message containing none of it.
+And `Display` for `Money` goes through `i128`, because `(i64::MIN).abs()` panics — there is a
+test pinning both extremes.
+
+One wrong expectation of mine, found by the test run: `"DROP TABLE"` is 10 characters, so it
+is refused as `TooLong` before any character check runs. The test was wrong, not the code.
+
+**Not done yet:** these types have no serde, so they cannot be serialized. That arrives with
+the JSON API in T3.1, and no sqlx mapping exists either — T1.6 is where the store starts
+needing it.
 
 ### [ ] T1.6: Migrations 0002 and 0003 — core tables and the trading calendar
 **What:** `app_user`, `api_token`, `instrument`, `watchlist_item`, `portfolio`; then
