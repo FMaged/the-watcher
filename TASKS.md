@@ -33,13 +33,26 @@ downstream docs that had been announcing the conflict this task resolved: the no
 top of `PLAN.md`, D11's cost paragraph, its Open table, and the warning in
 `doc/README.md`. C-12 is marked **Withdrawn** with its id kept, per §1.4.
 
-### [ ] T1.2: Repository and workspace skeleton
+### [x] T1.2: Repository and workspace skeleton
 **What:** `git init`, Cargo workspace, seven crate stubs, `src/main.rs`.
 **Why:** C-15. The dependency direction is what makes N-50 and N-54 checkable by reading
 `Cargo.toml` instead of reviewing code.
 **How:** `cargo new --lib` per crate under `crates/`, workspace `Cargo.toml`, `.gitignore`.
 Add each crate's dependencies in the one-way order from `doc/architecture.md` and no others.
-**Notes:** _(added after implementation)_
+**Notes:** Done. `cargo build`, `clippy -D warnings`, `fmt --check` and `test` all clean, and
+the internal dependency graph was asserted against `doc/architecture.md` package by package —
+it matches, and nothing depends on `watcher-api` but the binary.
+
+Three judgement calls. **No external dependencies yet**: "and no others" was read strictly, so
+no sqlx, axum, reqwest or tokio is present. Each crate that needs one picks it up in the task
+that needs it, and every `lib.rs` carries a doc comment naming what that crate may *not*
+depend on, so the rule travels with the code rather than living only in `doc/`. **Edition
+2021**, per `PLAN.md` — I had written 2024 first, which the toolchain supports and which is
+the usual choice for a new project; reverted to match the plan rather than change it quietly.
+Worth a decision either way (see the question below). **No boundary-check script**: the graph
+was verified by hand this once and `rust-review` documents the two `cargo tree -i` commands.
+A script asserting it in CI would stop the boundary rotting silently, which is the failure
+this task exists to prevent — not added, because it is beyond what the task asked for.
 
 ### [ ] T1.3: Compose stack and configuration
 **What:** `deploy/compose.yaml` with `watcher`, `postgres`, `caddy`. A `Config` struct read

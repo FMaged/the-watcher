@@ -1,0 +1,12 @@
+[package]
+name = "watcher-api"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+watcher-core = { path = "../watcher-core" }
+watcher-store = { path = "../watcher-store" }
+watcher-ledger = { path = "../watcher-ledger" }
+watcher-agent = { path = "../watcher-agent" }

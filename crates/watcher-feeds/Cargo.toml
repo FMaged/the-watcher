@@ -1,0 +1,9 @@
+[package]
+name = "watcher-feeds"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+watcher-core = { path = "../watcher-core" }

@@ -1,0 +1,22 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.91"
+publish = false
+
+[package]
+name = "watcher"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[[bin]]
+name = "watcher"
+path = "src/main.rs"
+
+[dependencies]
+watcher-api = { path = "crates/watcher-api" }
