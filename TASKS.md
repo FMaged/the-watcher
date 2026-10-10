@@ -166,14 +166,59 @@ is refused as `TooLong` before any character check runs. The test was wrong, not
 the JSON API in T3.1, and no sqlx mapping exists either — T1.6 is where the store starts
 needing it.
 
-### [ ] T1.6: Migrations 0002 and 0003 — core tables and the trading calendar
+### [x] T1.6: Migrations 0002 and 0003 — core tables and the trading calendar
 **What:** `app_user`, `api_token`, `instrument`, `watchlist_item`, `portfolio`; then
 `trading_calendar` seeded with US sessions and half-days for 2026–2030.
 **Why:** `PLAN.md` D16, D-15. N-3 and the derived trading day both need a calendar that tests
 can rely on and that cannot shift under them at runtime.
 **How:** Note the reserved-word renames in `doc/entities.md` (`user` → `app_user`). Portfolio
 starts at exactly 10,000 USD in minor units (F-60). The seed is data, not fixtures.
-**Notes:** _(added after implementation)_
+**Notes:** Done, verified against a throwaway PostgreSQL 17 cluster and torn down after. All
+three migrations apply from an empty database, and re-apply cleanly after a drop.
+
+**The calendar is generated, not typed.** `scripts/gen-trading-calendar.py` produces the 1826
+rows from NYSE's published rules and stays in the repository as the audit trail — hand-typed
+rows at that volume cannot be reviewed, so the script *is* the review surface. Verified in the
+database: 10 closures a year, and 9 in 2028, which is the rule nobody remembers — when 1
+January falls on a Saturday the exchange does not close the preceding 31 December. 2027-12-31
+is a session and 2028-01-03 is the next one. Spot-checked the awkward ones too: 4 July 2026 is
+a Saturday so 3 July closes, 4 July 2027 is a Sunday so 5 July closes, and 3 July 2028 is an
+early close rather than a holiday.
+
+**A caveat recorded in the migration itself, because it matters before the 14-day run:** these
+dates come from the *rules*, not from the exchange's published calendar. The rules are stable,
+but the exchange occasionally closes for something no rule predicts — a state funeral, a
+hurricane. The official calendar should be checked before §11 depends on it, and any
+difference corrected with a new migration rather than by editing 0003.
+
+**`is_trading_day(date)` raises on a date outside the seed**, rather than answering false.
+This is the failure I most wanted to make impossible: on the first day of 2031 an unguarded
+lookup would quietly answer "not a session" for every date, the nightly job would skip every
+night, and nothing would look broken — the record would simply stop accruing, which for this
+product is the worst outcome there is. Verified: it raises with *extend the seed past its
+current range*.
+
+**Two things I got wrong and corrected.** My verification grep over the generated SQL reported
+only 8 holidays a year, and I nearly went looking for a bug in the generator — the regex could
+not match `New Year''s Day` or `Washington''s Birthday`, where the apostrophe is SQL-escaped.
+The data was right and the check was wrong, which is why this was verified by querying the
+database rather than by grepping a file. And a comment in 0002 claimed the SQL ticker
+constraint and the Rust `Ticker` type "must agree", which is not true and not desirable: Rust
+normalises `' aapl '` to `AAPL` at the edge, while the constraint refuses lowercase outright.
+By the time a value reaches the database it has been through that normalising, so lowercase
+there means a code path bypassed the type — which is exactly what should fail. The comment now
+says so.
+
+Also verified: the seeded portfolio holds exactly 1,000,000 cents (F-60), the ticker
+constraint accepts `AAPL`, `BRK.B` and `A` while refusing `TOOLONG`, `A B`, `AA1` and
+`BRK.BBB`, and 0001's default privileges gave every new table `INSERT, SELECT` and nothing
+more — so these tables are append-only by default without anyone writing a revoke. The one
+exception worth fixing later is `trading_calendar`, which is seed-only and should lose its
+INSERT in 0009; that is now on 0009's list in a comment.
+
+**Not done:** nothing applies these migrations yet — still no sqlx and no runner, so they go on
+by hand with `psql`. F-2's 50-ticker cap is left to the application, because the requirement
+asks for a refusal that explains why and a constraint violation explains nothing.
 
 ### [ ] T1.7: Migration 0004 — market data tables
 **What:** `price_bar`, `corporate_action`, `news_item`.

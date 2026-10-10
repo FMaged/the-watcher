@@ -26,6 +26,7 @@ Early. The planning documents are complete and the first three tasks are done.
 | T1.3 | Compose stack, configuration with fail-fast validation |
 | T1.4 | Two database roles, migration 0001, the D-12 privilege check |
 | T1.5 | Core types: money, trading days, tickers, sides, shares |
+| T1.6 | Core tables and the seeded 2026-2030 trading calendar |
 
 **What the binary does today:** reads its configuration, validates it, prints one line and
 exits. There is no HTTP server yet (T1.9), no database schema (T1.4) and no agent (Stage 2).
