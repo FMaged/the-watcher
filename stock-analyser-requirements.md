@@ -1,6 +1,6 @@
 # The Watcher — requirements
 
-Version 1.3 · 2026-10-10 · Status: draft for review
+Version 1.4 · 2026-10-10 · Status: draft for review
 
 ---
 
@@ -410,9 +410,10 @@ An endpoint reports database reachability, last successful nightly job and last 
 
 ### 6.5 Web interface
 
-**I-40** · M — Chart data is available as its own JSON endpoint, separate from the page that displays it.
+**I-40** · M — The entire interface is JSON. No endpoint returns HTML. Chart data has its own endpoint whose shape is fixed once the frontend is built against it, and changes to it are versioned from that point.
+*Accept:* every response from the backend is JSON, and the chart endpoint can be read and understood without the application that displays it.
 
-**I-41** · M — Works on a phone screen for reading. Editing the watchlist on a phone is **S**.
+**I-41** · **Moved to the frontend's scope** — reading on a phone screen, and whether the watchlist can be edited there, are decisions about pages, and C-14 gives pages to the frontend. The requirement is not withdrawn: it still has to be true of the delivered product, but this document no longer specifies how.
 
 ---
 
@@ -474,11 +475,15 @@ One exception, and it is deliberately narrow: a ledger entry for a corporate act
 
 ### 8.2 Performance
 
-**N-10** · M — A ticker page renders in under 2 seconds with a year of bars and 50 annotations.
+**N-10** · M — The chart endpoint responds within a budget that is **not yet set**, with a year of bars and 50 annotations in the response. The figure is deliberately absent: it is measured against real accrued data once the endpoint exists, and recorded then. See O-11.
+*Accept:* the measured figure is written into this requirement, and the endpoint meets it.
 
 **N-11** · M — Reading any page triggers no model call.
 
 **N-12** · S — A full run over 50 tickers completes in under 10 minutes.
+
+**N-13** · M — A ticker page is readable within 2 seconds of a cold load, with a year of bars and 50 annotations drawn. This is the frontend's budget and it includes whatever N-10 costs.
+*Why:* the original N-10 held one number against a server-rendered page. With C-14 the work is split across two deployables, and a single budget would let each blame the other.
 
 ### 8.3 Availability and recovery
 
@@ -516,7 +521,7 @@ One exception, and it is deliberately narrow: a ledger entry for a corporate act
 **N-43** · M — One user can never read another user's watchlist, analyses or portfolio.
 *Accept:* a request with a valid token for user A cannot reach user B's data by changing an id.
 
-**N-44** · M — Input from the model is never rendered as raw HTML.
+**N-44** · M — Input from the model is never rendered as raw HTML. Under C-14 this is primarily the frontend's obligation, and it is one specific construct in whatever framework it uses — the escape hatch that takes a string and injects it as markup. The backend's part is to never store or serve model output as HTML.
 
 **N-45** · S — Rate limits per token on all write tools.
 
@@ -573,15 +578,17 @@ These are not preferences. Breaking one changes what the product legally is. Bas
 
 **C-10** · M — Rust with axum. PostgreSQL. One binary.
 **C-11** · M — US-listed stocks only in v1.
-**C-12** · M — No build pipeline for the frontend in v1.
+**C-12** · **Withdrawn** — the frontend is a separate client-rendered application and has its own build. Withdrawn because C-14 changed, not because the reasoning was wrong: a no-build frontend was the right call for server-rendered pages and is not available for client-rendered ones. The cost is a second build to maintain and a second artifact to deploy.
 **C-13** · M — Runs on a single host.
-**C-14** · M — Pages are server-rendered. Charts are drawn client-side from JSON.
-**C-15** · M — One Cargo workspace, one deployable binary, with crate-level boundaries between analysis, orders and web.
+**C-14** · M — Pages are client-rendered. The backend serves JSON and nothing else; the frontend owns every page, its routing and its own build. Which library draws the charts is the frontend's decision and is not fixed here — what is fixed is the JSON contract it draws from (I-40).
+**C-15** · M — One Cargo workspace producing one binary, with crate-level boundaries between analysis, orders and the API. The frontend is a separate static artifact, so the system has two deployables; the Rust side still has exactly one.
 **C-16** · M — Schema changes are versioned migrations.
 **C-17** · M — The repository is `the-watcher`, the binary `watcher`.
 **C-18** · M — Deployed on a single small VPS, not on home hardware. TLS, uptime and the unattended 14-day run are all easier on a host with provider snapshots.
 **C-19** · M — Half-spread 5 basis points, flat fee 1 USD per order. Both configurable, both revisited once there is real data.
 **C-20** · M — The annotation warning threshold (F-23) starts at 25% from the last close. It is a starting value chosen to be revised, not a considered one.
+**C-21** · M — Deployed as one Compose stack on the single host of C-18: the Rust binary, PostgreSQL, and a reverse proxy that terminates TLS and serves the frontend build. Frontend and API are served from one origin, so there is no cross-origin configuration to get wrong and no credential in client-side JavaScript.
+**C-22** · M — Until there is a login, the reverse proxy requires basic authentication for the whole site, with the MCP route excluded. The exclusion is necessary, not an oversight: a connected assistant authenticates with its own token (F-91), and a proxy-level challenge would refuse it before that token is read. The chat endpoint spends money per request, which is why the rest of the site is not left open.
 
 These are choices already made, recorded so the requirements above do not have to carry them. The reasoning behind each belongs in `PLAN.md`.
 
@@ -631,6 +638,7 @@ The 14 days is the real test. Everything else can be faked in an afternoon. A re
 | O-3 | **Hours per week available.** The only one nobody else can answer, and per the risk list it decides whether the milestones are a plan or a wish. | milestone sizing |
 | O-5 | News provider. | I-20 |
 | O-10 | **Measured tokens per ticker-day.** Not an estimate: the provider's token-counting endpoint, run over a real context pack, on the day F-18's assembler first works. N-33 is a Must and on the standard tier the price per token multiplies past the line, so a wrong figure is not a cost surprise but a fivefold one. Check separately whether the upper tier's model carries its own long-context pricing before N-33's reasoning is applied to both tiers. | N-33, F-19, cost model |
+| O-11 | **The N-10 budget.** How fast the chart endpoint must answer with a year of bars and 50 annotations. Deliberately unset rather than guessed: it is measured against real accrued data once the endpoint exists, then written into N-10. A number chosen now would be an invention that later measurements get compared against. | N-10 |
 
 ### Closed
 
@@ -650,6 +658,7 @@ The 14 days is the real test. Everything else can be faked in an afternoon. A re
 
 | Version | Date | Change |
 | --- | --- | --- |
+| 1.4 | 2026-10-10 | The web tier becomes client-rendered with a JSON-only backend, which is a design decision reaching back into the constraints. C-14 rewritten, C-12 withdrawn as a consequence of it, C-15 clarified to one Rust binary beside a separate frontend artifact. C-21 and C-22 added for the Compose stack, the single origin, and proxy-level basic auth with the MCP route excluded. I-40 rewritten — the whole interface is JSON and the chart contract is fixed once built against. I-41 moved to the frontend's scope without being withdrawn. N-10 split: the backend budget is left unset pending measurement (O-11) and N-13 added for the frontend's render budget. N-44 states whose obligation it now is. |
 | 1.3 | 2026-10-10 | Four conflicts between v1.2 requirements resolved. An order now references its run, not an analysis id, which a single-shot agent cannot know (F-62, I-1). Verdicts append rather than edit, and may be provisional (F-84). The context budget belongs to the request, not the pack (F-19). `trading_day` gets one narrow exception for corporate actions (D-11). Raw payloads keyed to the run so rejections survive (D-14). Parity scoped to writes and validation, not reach (F-96). Tool choice never forced, closing O-9 (I-35). Input tokens per request counted, without which the last acceptance box cannot be ticked (N-61). Entities `raw_model_output` and `call_verdict` added. |
 | 1.2 | 2026-10-10 | Capability parity and the single-shot difference between hosted and connected agents stated (F-96, F-97). One context pack with a token budget (F-18, F-19). F-84 raised to M as a verdict per call, paid for by moving F-52 and F-72 to L. N-1 moved from promise to schema: derived trading day, revoked UPDATE and DELETE, natural keys, raw payloads, seeded trading calendar (D-11 to D-15). Batch and prompt caching added (I-33, I-34, N-33, N-34). One annotation schema definition (N-55). Ledger testable without a database (N-56). Six open issues closed into constraints C-17 to C-20; O-9 and O-10 opened. |
 | 1.1 | 2026-10-10 | Analyses made immutable with trigger, data cutoff and version (F-14 to F-17). Annotation validation reworked per kind, distant prices flagged instead of rejected (F-23). Confidence withdrawn (F-24). Design decisions moved out of N-50 to N-52, I-40 and D-1 into constraints C-14 to C-16 and `PLAN.md`. |

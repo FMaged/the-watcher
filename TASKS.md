@@ -15,7 +15,7 @@ it runs.
 Ends with: a deployed instance ingesting daily price bars and writing snapshots, unattended.
 **No AI in this stage at all.**
 
-### [ ] T1.1: Amend the requirements to v1.4
+### [x] T1.1: Amend the requirements to v1.4
 **What:** Fix the conflicts `PLAN.md` D11 created — C-12 withdrawn, C-14 rewritten for a
 JSON-only backend, C-15 clarified, two new constraints for the Compose stack and basic auth,
 I-40 rewritten, I-41 moved to frontend scope, N-10 split into an API budget and a frontend
@@ -24,7 +24,14 @@ budget.
 the authority all along; leaving it wrong makes every later reference ambiguous.
 **How:** Edit `stock-analyser-requirements.md`, bump to v1.4, add the change-log row. Leave
 N-10's backend number as a hole — it gets measured in T3.3.
-**Notes:** _(added after implementation)_
+**Notes:** Done. Two things went beyond the task as written. **N-13 added**: splitting N-10
+needed a second id, because the frontend's render budget had nowhere to live and one number
+across two deployables lets each side blame the other. **O-11 opened** for N-10's missing
+figure — `PLAN.md` had been tracking it as its own `P-1`, which was a second numbering scheme
+for the same hole, so `P-1` is gone and the requirements doc owns it. Also updated the
+downstream docs that had been announcing the conflict this task resolved: the notice at the
+top of `PLAN.md`, D11's cost paragraph, its Open table, and the warning in
+`doc/README.md`. C-12 is marked **Withdrawn** with its id kept, per §1.4.
 
 ### [ ] T1.2: Repository and workspace skeleton
 **What:** `git init`, Cargo workspace, seven crate stubs, `src/main.rs`.
@@ -274,10 +281,11 @@ annotations, and the earlier versions.
 never replaces the last good one.
 **Notes:** _(added after implementation)_
 
-### [ ] T3.3: Measure the chart endpoint and close P-1
+### [ ] T3.3: Measure the chart endpoint and close O-11
 **What:** Measure p95 latency with a year of bars and 50 annotations, then write that number
 into N-10.
-**Why:** `PLAN.md` leaves P-1 open deliberately rather than guessing a budget.
+**Why:** N-10's figure is deliberately absent and recorded as O-11 rather than guessed. A
+number invented now would be the thing later measurements got compared against.
 **How:** Measure against real accrued data, not fixtures. Record the backend figure in the
 requirements and leave the frontend's render budget to the frontend.
 **Notes:** _(added after implementation)_

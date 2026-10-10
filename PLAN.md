@@ -1,13 +1,9 @@
 # The Watcher — technical plan
 
-Version 1.0 · 2026-10-10 · Design for `stock-analyser-requirements.md` v1.3
+Version 1.1 · 2026-10-10 · Design for `stock-analyser-requirements.md` v1.4
 
 This document records **how** the system is built and **why** each choice was made.
 What it must do lives in the requirements. Task breakdown lives in `TASKS.md`.
-
-> **Open conflict:** the JSON-only decision (D11) contradicts requirements **C-12** and
-> **C-14**, both Musts. The requirements doc needs a v1.4 amendment to match this plan.
-> Until that lands, this plan and the requirements disagree, and the requirements win.
 
 ---
 
@@ -290,10 +286,12 @@ wire (D-3). `kind` is one of the six allowed values; `low`/`high` are set for zo
   its own build.
 - **Why:** chosen by the project owner. It gives the frontend full freedom over rendering and
   over the chart library, and keeps the backend's obligation to one thing: a contract.
-- **Alternatives:** server-rendered pages with a chart JSON endpoint, as C-14 currently
-  requires — one deployable, no build pipeline, less frontend freedom.
-- **Cost, stated plainly:** this amends **C-12** and **C-14**, both Musts, and adds a second
-  deployable to a single host. Those amendments are not yet written.
+- **Alternatives:** server-rendered pages with a chart JSON endpoint, which is what C-14
+  required before v1.4 — one deployable, no build pipeline, less frontend freedom.
+- **Cost, stated plainly:** this cost two Musts. Requirements v1.4 rewrote **C-14**, withdrew
+  **C-12**, clarified **C-15**, and added **C-21** and **C-22** for the Compose stack, the
+  single origin and proxy-level basic auth. The system now has two deployables on one host,
+  and the frontend has a build to maintain.
 
 ### D12: Svelte 5 + Vite + TypeScript
 - **Choice:** Svelte, five pages, `fetch` against `/api`.
@@ -455,8 +453,7 @@ All secrets from the environment, never in the repository, the browser or the lo
 
 | # | Question | Blocks |
 |---|---|---|
-| **P-1** | The N-10 split. The backend's chart-endpoint latency budget is **not set** — it will be measured on real data in M2 and recorded then, rather than guessed now. | N-10 amendment |
+| **O-11** | The backend's chart-endpoint latency budget is **not set**. Measured against real accrued data in M2 and written into N-10 then, rather than guessed now. | N-10 |
 | **O-3** | Hours per week. The only one nobody else can answer. | milestone sizing |
 | **O-5** | News provider. | I-20, M4 |
 | **O-10** | Measured tokens per ticker-day, via the provider's token-counting endpoint over a real pack, on the day M1's assembler first works. | N-33, F-19, cost model |
-| — | The v1.4 requirements amendment that makes C-12 and C-14 agree with D11. | consistency |

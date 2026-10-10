@@ -28,7 +28,5 @@ When these documents disagree, the order is:
 2. `PLAN.md` — how it is built and why
 3. `doc/` — this folder, which only elaborates the two above
 
-> **Known disagreement:** `PLAN.md` D11 (JSON-only backend) contradicts requirements
-> **C-12** and **C-14**, both Musts. These documents follow `PLAN.md`, because that is the
-> design being built, but the requirements have not yet been amended to v1.4. Anything in
-> `doc/` describing the frontend as a separate deployable inherits that disagreement.
+These documents describe a client-rendered frontend over a JSON-only backend, which is
+`PLAN.md` D11 and, since requirements v1.4, **C-14** as well. The three documents agree.
