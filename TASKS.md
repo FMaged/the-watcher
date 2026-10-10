@@ -54,14 +54,34 @@ was verified by hand this once and `rust-review` documents the two `cargo tree -
 A script asserting it in CI would stop the boundary rotting silently, which is the failure
 this task exists to prevent — not added, because it is beyond what the task asked for.
 
-### [ ] T1.3: Compose stack and configuration
+### [x] T1.3: Compose stack and configuration
 **What:** `deploy/compose.yaml` with `watcher`, `postgres`, `caddy`. A `Config` struct read
 from the environment, failing fast on anything missing.
 **Why:** `PLAN.md` D18. N-40 — secrets come from the environment and never appear in the
 repository, the browser or the logs.
 **How:** Compose file, a plain Caddyfile proxying `/api` (basic auth comes in T3.7), config
 module covering the variables in `PLAN.md` § Configuration.
-**Notes:** _(added after implementation)_
+**Notes:** Done. `deploy/compose.yaml` validates, `src/config.rs` covers every variable in
+`PLAN.md` § Configuration, and the binary was run three ways: no env fails with
+`DATABASE_URL is not set` and exit 1, a full env starts, and a `mysql://` URL is refused.
+Eight unit tests.
+
+**Not verified: the image build and the stack coming up.** There is no Docker daemon on this
+machine, only the CLI, so `compose config` passed but `docker build` could not run. T1.14 is
+where that gets proven; until then the Dockerfile is unexercised code.
+
+Four things came up. **A `Secret` wrapper** — `Config` is exactly the struct someone prints
+while debugging, and a derived `Debug` would put the database password and the model key in
+that line. `Debug` and `Display` both render `<redacted>`, reading one takes an explicit
+`.expose()` that greps cleanly, and a test asserts no secret survives a `Config` debug line.
+**Startup validation** — the URL scheme and the warning threshold are checked at boot, so a
+typo surfaces now instead of at the first query, which on a scheduled run means the following
+night. **The env file lives in `deploy/`, not the repository root** — Compose reads `.env`
+from the compose file's own directory for interpolation, so a root env file would have
+quietly reached the containers while leaving `${POSTGRES_PASSWORD}` unsubstituted. One
+location, no ambiguity. **Two `docker-review` points knowingly skipped**: secrets are passed
+as environment variables rather than files, and there are no memory or CPU limits. Both are
+worth revisiting in T6.1 when the host is real; neither is worth the moving parts today.
 
 ### [ ] T1.4: Database roles, migration 0001
 **What:** `watcher_owner` and `watcher_app`, two connection strings.

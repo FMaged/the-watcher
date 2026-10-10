@@ -1,0 +1,31 @@
+# Set WATCHER_DOMAIN to a real hostname and Caddy issues a certificate for it automatically
+# (N-42). Left as localhost it serves plain HTTP, which is fine for a laptop and not for the
+# VPS of C-18.
+{$WATCHER_DOMAIN:localhost} {
+	encode zstd gzip
+
+	# C-22: the MCP route must stay outside the basic-auth block added in T3.7. A connected
+	# assistant authenticates with its own bearer token (F-91), and a proxy-level challenge
+	# would refuse it before that token is ever read — MCP would simply never work.
+	handle /mcp* {
+		reverse_proxy watcher:8080
+	}
+
+	handle /api/* {
+		reverse_proxy watcher:8080
+	}
+
+	# Reachable without credentials on purpose: a health check that needs a password tells
+	# you nothing when the thing you are checking is whether anyone can get in (F-102).
+	handle /health {
+		reverse_proxy watcher:8080
+	}
+
+	# The Svelte build lands in this volume in T3.8. Until then this serves nothing, which is
+	# correct rather than broken.
+	handle {
+		root * /srv/frontend
+		try_files {path} /index.html
+		file_server
+	}
+}

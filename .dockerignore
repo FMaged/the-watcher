@@ -1,0 +1,12 @@
+.git
+.gitignore
+target
+frontend/node_modules
+frontend/dist
+.env
+.env.*
+!.env.example
+*.md
+doc
+deploy
+.claude
