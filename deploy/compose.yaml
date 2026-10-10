@@ -13,8 +13,14 @@ services:
       POSTGRES_DB: the_watcher
       POSTGRES_USER: watcher_owner
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      # Read by initdb/10-roles.sh, which is the only place the application role's password
+      # is set. Migration 0001 grants it privileges but never knows the secret.
+      WATCHER_APP_PASSWORD: ${WATCHER_APP_PASSWORD:?set WATCHER_APP_PASSWORD in .env}
     volumes:
       - pgdata:/var/lib/postgresql/data
+      # Scripts here run once, on first initialisation of an empty data directory. They do
+      # NOT run again on a later start, so changing them means recreating the volume.
+      - ./initdb:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U watcher_owner -d the_watcher"]
       interval: 10s

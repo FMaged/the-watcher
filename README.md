@@ -24,6 +24,7 @@ Early. The planning documents are complete and the first three tasks are done.
 | T1.1 | Requirements at v1.4 |
 | T1.2 | Cargo workspace, seven crates with one-way dependencies |
 | T1.3 | Compose stack, configuration with fail-fast validation |
+| T1.4 | Two database roles, migration 0001, the D-12 privilege check |
 
 **What the binary does today:** reads its configuration, validates it, prints one line and
 exits. There is no HTTP server yet (T1.9), no database schema (T1.4) and no agent (Stage 2).
@@ -39,7 +40,7 @@ You need Docker with a running daemon, and Compose v2.
 
 ```bash
 cp deploy/.env.example deploy/.env
-$EDITOR deploy/.env          # at minimum, set POSTGRES_PASSWORD
+$EDITOR deploy/.env          # set POSTGRES_PASSWORD and WATCHER_APP_PASSWORD
 ```
 
 The env file lives in `deploy/`, beside the compose file, and not at the repository root.
@@ -86,6 +87,19 @@ authenticates with its own token, and a proxy-level challenge would refuse it be
 token is ever read.
 
 ## Running it without containers
+
+Against a local PostgreSQL cluster, provision the roles once — passwords passed in rather
+than written into a file the repository tracks:
+
+```bash
+sudo -u postgres psql \
+  -v owner_pw="$(openssl rand -base64 24)" \
+  -v app_pw="$(openssl rand -base64 24)" \
+  -f deploy/bootstrap-local.sql
+```
+
+Put those two passwords into `deploy/.env` as `MIGRATE_DATABASE_URL` and `DATABASE_URL`, with
+`@localhost` in place of `@postgres`, then:
 
 ```bash
 set -a; . deploy/.env; set +a

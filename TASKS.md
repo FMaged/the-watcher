@@ -83,13 +83,46 @@ location, no ambiguity. **Two `docker-review` points knowingly skipped**: secret
 as environment variables rather than files, and there are no memory or CPU limits. Both are
 worth revisiting in T6.1 when the host is real; neither is worth the moving parts today.
 
-### [ ] T1.4: Database roles, migration 0001
+### [x] T1.4: Database roles, migration 0001
 **What:** `watcher_owner` and `watcher_app`, two connection strings.
 **Why:** `PLAN.md` D7. This is the mechanism behind N-1 — a database that *cannot* rewrite
 history beats a promise that it will not.
 **How:** `0001_roles.sql` per `doc/database.md`. `MIGRATE_DATABASE_URL` for migrations,
 `DATABASE_URL` for the app.
-**Notes:** _(added after implementation)_
+**Notes:** Done, and **verified end to end against a real cluster** — PostgreSQL 17 was
+installed here but I had no credentials for it, so I ran a throwaway cluster of my own in the
+scratchpad over TCP (the scratchpad path exceeds the 107-byte limit for a unix socket) and
+tore it down afterwards. The system cluster was never touched.
+
+`doc/database.md` described this wrongly and has been corrected. It wrote 0001 as
+`CREATE ROLE ... PASSWORD :'owner_pw'`, which is psql-variable syntax a migration cannot use,
+and it would have put a password in a repository file either way (N-40). **Role creation moved
+to provisioning** — `deploy/initdb/10-roles.sh` in the container, `deploy/bootstrap-local.sql`
+on a local cluster — and migration 0001 owns only the privilege model, which needs no secret.
+The ordering also forces this: initdb runs at container creation, long before any migration.
+
+**The privilege model came out better than planned.** Rather than granting everything and
+revoking per table, 0001 sets `ALTER DEFAULT PRIVILEGES` to `SELECT, INSERT` only. Any table a
+later migration creates is append-only *by default*, and the few that need UPDATE are the
+exception 0009 writes down. The old way meant forgetting a revoke handed out too much;
+forgetting now hands out too little, which fails in a test rather than in production. Proven:
+a table created after the migration grants exactly `INSERT, SELECT`, and UPDATE and DELETE are
+refused.
+
+**`deploy/verify-roles.sql` was rewritten after its first version proved nothing.** It ran
+UPDATE and DELETE as `watcher_app` and looked for "permission denied" — but a table that does
+not exist yet fails with "relation does not exist", so a run against a half-built schema looked
+like a pass. It now asserts against `information_schema.table_privileges`, reports not-yet-
+created tables separately as unproven, and was checked both ways: granting UPDATE makes it
+raise, revoking makes it pass.
+
+Also verified: the missing-role guard raises with the fix in its message, both scripts are
+idempotent, and a password containing a single quote works — which is why the password reaches
+psql as a variable rather than being interpolated into SQL text.
+
+**Not verified:** nothing applies these migrations yet. There is no sqlx dependency and no
+migration runner, so `MIGRATE_DATABASE_URL` is still unused by the binary. That lands in T1.6
+with the first real tables; until then the files are applied by hand with `psql`.
 
 ### [ ] T1.5: Core types
 **What:** `Money` (i64 minor units), `TradingDay`, `Ticker`, `Side` in `watcher-core`.

@@ -11,26 +11,42 @@ A promise that history is never rewritten is worth less than a database that can
 
 ```mermaid
 flowchart LR
-    APP["watcher binary"] -->|"DATABASE_URL"| R1["role: watcher_app<br/>SELECT, INSERT everywhere<br/>UPDATE/DELETE on most tables<br/><b>neither on the append-only five</b>"]
+    APP["watcher binary"] -->|"DATABASE_URL"| R1["role: watcher_app<br/>SELECT, INSERT by default<br/>UPDATE/DELETE only where<br/>0009 grants it explicitly"]
     MIG["migrations"] -->|"MIGRATE_DATABASE_URL"| R2["role: watcher_owner<br/>owns every object<br/>full DDL"]
     R1 --> DB[("the_watcher")]
     R2 --> DB
 ```
 
-```sql
--- 0001_roles.sql, run as a superuser once
-CREATE ROLE watcher_owner LOGIN PASSWORD :'owner_pw';
-CREATE ROLE watcher_app   LOGIN PASSWORD :'app_pw';
-ALTER DATABASE the_watcher OWNER TO watcher_owner;
+Roles are created at **provisioning** time, not by a migration. A migration is a file in the
+repository, and a password in the repository is a password that has leaked (N-40), so the
+secret stays in the environment:
 
--- at the end of every migration that creates tables:
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO watcher_app;
-
--- then take back what must never happen (D-12):
-REVOKE UPDATE, DELETE ON analysis, annotation, ledger_entry,
-                         news_take, raw_model_output, call_verdict
-  FROM watcher_app;
+```sh
+# container: deploy/initdb/10-roles.sh, on first initialisation of the data directory
+# local:     sudo -u postgres psql -v owner_pw=... -v app_pw=... -f deploy/bootstrap-local.sql
 ```
+
+The password reaches psql as a variable, so `:'app_pw'` expands to a correctly quoted
+literal — a password containing a quote cannot break the SQL. Verified with one that does.
+
+Migration `0001_roles.sql` then owns the privilege *model*, which needs no secret:
+
+```sql
+ALTER DEFAULT PRIVILEGES FOR ROLE watcher_owner IN SCHEMA public
+  GRANT SELECT, INSERT ON TABLES TO watcher_app;
+```
+
+**UPDATE and DELETE are absent on purpose, and that inverts the failure mode.** Any table a
+later migration creates is automatically readable and insertable by the application and
+nothing more, so append-only is what happens when nobody does anything. The few tables that
+genuinely need UPDATE become the exception, written down in 0009.
+
+The earlier design here granted everything and revoked it per table, which meant adding an
+append-only table and forgetting the revoke handed out too much. Forgetting now hands out too
+little, which fails in a test rather than in production.
+
+Verified against a real cluster: a table created after the migration grants exactly
+`INSERT, SELECT`, and `UPDATE`/`DELETE` are refused.
 
 **§11 tests this directly**: "the application database role is proven unable to update or
 delete an analysis." The test connects as `watcher_app` and asserts the UPDATE is refused.
@@ -224,7 +240,7 @@ Forward only. A migration is never edited after it has run anywhere.
 
 | # | File | Contents |
 |---|---|---|
-| 0001 | `roles.sql` | the two roles, ownership |
+| 0001 | `roles.sql` | the privilege model and default privileges. The roles themselves are provisioned, not migrated |
 | 0002 | `core.sql` | `app_user`, `api_token`, `instrument`, `watchlist_item`, `portfolio` |
 | 0003 | `calendar.sql` | `trading_calendar` **plus its seed data**, 2026–2030 (**D-15**) |
 | 0004 | `market_data.sql` | `price_bar`, `corporate_action`, `news_item` |

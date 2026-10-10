@@ -116,9 +116,8 @@ that takes an exclusive lock for a minute at the wrong moment is an outage.
 sqlx migrate info                          # what has run where
 sqlx migrate run --database-url "$MIGRATE_DATABASE_URL"
 
-# the D-12 revokes actually took effect
-psql -c "\dp analysis"
-psql -c "SET ROLE watcher_app; UPDATE analysis SET summary='x' WHERE false;"   # must fail
+# the D-12 revokes actually took effect, across every append-only table
+psql "$MIGRATE_DATABASE_URL" -f deploy/verify-roles.sql
 
 # what a statement will actually lock, before running it for real
 psql -c "BEGIN; <the statement>; SELECT locktype, mode, relation::regclass FROM pg_locks WHERE pid = pg_backend_pid(); ROLLBACK;"
@@ -126,8 +125,14 @@ psql -c "BEGIN; <the statement>; SELECT locktype, mode, relation::regclass FROM 
 psql -c "\d+ ledger_entry"                 # constraints, indexes, triggers as built
 ```
 
-The `SET ROLE` line is worth running after every migration that adds a table, not only after
+`verify-roles.sql` is worth running after every migration that adds a table, not only after
 one that changes grants. It is the §11 acceptance box, and it is one command.
+
+It asserts against `information_schema.table_privileges` rather than attempting a write and
+matching on "permission denied". Attempting writes has a quiet failure mode: a table that does
+not exist yet fails with "relation does not exist", and anyone skimming the output for
+failures counts that as proof. Tables that do not exist yet are reported separately, as not
+yet proven.
 
 ## How to report
 
