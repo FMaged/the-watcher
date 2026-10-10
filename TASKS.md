@@ -66,9 +66,14 @@ module covering the variables in `PLAN.md` § Configuration.
 `DATABASE_URL is not set` and exit 1, a full env starts, and a `mysql://` URL is refused.
 Eight unit tests.
 
-**Not verified: the image build and the stack coming up.** There is no Docker daemon on this
-machine, only the CLI, so `compose config` passed but `docker build` could not run. T1.14 is
-where that gets proven; until then the Dockerfile is unexercised code.
+**Verified later, once a Docker daemon was available.** The image builds (127MB, uid 10001,
+exec-form entrypoint) and fail-fast works inside the container. Running the stack found two
+things `compose config` could not: Caddy's `depends_on: watcher` meant `up -d postgres caddy`
+quietly started the watcher service too, so the README's own advice did not hold — the
+dependency is removed, because Caddy serves static files and 502s the API either way, which is
+the right behaviour when the API is down. And the README claimed `localhost` serves plain
+HTTP; Caddy redirects to HTTPS and issues a certificate from its local CA regardless, so
+`curl` needs `-k`. Both corrected.
 
 Four things came up. **A `Secret` wrapper** — `Config` is exactly the struct someone prints
 while debugging, and a derived `Debug` would put the database password and the model key in

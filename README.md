@@ -32,9 +32,10 @@ Early. The planning documents are complete and the first three tasks are done.
 exits. There is no HTTP server yet (T1.9), no database schema (T1.4) and no agent (Stage 2).
 See [`TASKS.md`](TASKS.md) for what is next.
 
-Two things are unverified: the container image has never been built, and the stack has never
-been started — the machine this was developed on has the Docker CLI but no daemon. T1.14 is
-where that gets proven.
+The stack has been built and run: the image is 127MB and runs as uid 10001, `initdb` creates
+the restricted role, all three migrations apply, and Caddy routes `/api`, `/health` and `/mcp`
+to the binary (502 until T1.9) while serving the frontend volume at `/`. What has *not* been
+proven is the VPS of C-18 — this was a laptop — and the restore drill of N-21.
 
 ## Running the containers
 
@@ -62,7 +63,8 @@ That prints a startup line and exits 0, or names the first variable that is wron
 **Do not use `docker compose up` for the watcher service yet.** The binary is not a server
 until T1.9, so it exits as soon as it has printed, and `restart: unless-stopped` will start it
 again immediately — a restart loop that looks like a fault and is not. The database and proxy
-are fine to bring up on their own:
+are fine to bring up on their own, and Caddy deliberately does not depend on the API so that
+this really does leave the watcher service alone:
 
 ```bash
 docker compose up -d postgres caddy
@@ -80,9 +82,11 @@ docker compose down            # add -v to also drop the database volume
 | `caddy` | The only way in. Terminates TLS, serves the frontend build, proxies `/api` |
 
 Only Caddy publishes ports. That is deliberate: it is what stops the basic auth added in T3.7
-from being bypassed by calling the API directly. Set `WATCHER_DOMAIN` to a real hostname and
-Caddy issues a certificate for it automatically; left as `localhost` it serves plain HTTP,
-which is fine for a laptop and not for a server.
+from being bypassed by calling the API directly. Set `WATCHER_DOMAIN` to a real hostname and Caddy issues a
+certificate for it automatically.
+
+Left as `localhost` it still redirects HTTP to HTTPS and serves a certificate from Caddy's own
+local CA, so `curl` needs `-k` and a browser will warn once. There is no plain-HTTP mode.
 
 The `/mcp` route is excluded from that basic auth on purpose — a connected assistant
 authenticates with its own token, and a proxy-level challenge would refuse it before that
