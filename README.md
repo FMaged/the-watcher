@@ -1,0 +1,150 @@
+# The Watcher
+
+A workspace for people who follow a handful of stocks. An AI agent reads the watchlist every
+day, marks the chart with where it would buy and sell, explains the news, and answers
+questions about what it sees. It trades on paper, so every call it makes is scored against the
+market over time. You act in your own broker app.
+
+The product is the visible reasoning and the honest scoreboard. The agent beating the market
+is explicitly **not** a goal — it probably will not, most of the time, and the record says so.
+
+## Not investment advice
+
+This is information, not advice. It places no real orders, holds no money or securities, and
+manages nobody's assets. It never asks for your income, savings, risk tolerance or investment
+goals, and there is no field anywhere in the schema to store them — collecting those and then
+naming an instrument is what makes a product a licensed one.
+
+## Status
+
+Early. The planning documents are complete and the first three tasks are done.
+
+| Done | |
+|---|---|
+| T1.1 | Requirements at v1.4 |
+| T1.2 | Cargo workspace, seven crates with one-way dependencies |
+| T1.3 | Compose stack, configuration with fail-fast validation |
+
+**What the binary does today:** reads its configuration, validates it, prints one line and
+exits. There is no HTTP server yet (T1.9), no database schema (T1.4) and no agent (Stage 2).
+See [`TASKS.md`](TASKS.md) for what is next.
+
+Two things are unverified: the container image has never been built, and the stack has never
+been started — the machine this was developed on has the Docker CLI but no daemon. T1.14 is
+where that gets proven.
+
+## Running the containers
+
+You need Docker with a running daemon, and Compose v2.
+
+```bash
+cp deploy/.env.example deploy/.env
+$EDITOR deploy/.env          # at minimum, set POSTGRES_PASSWORD
+```
+
+The env file lives in `deploy/`, beside the compose file, and not at the repository root.
+Compose reads `.env` from the compose file's own directory for variable interpolation, so a
+root env file would quietly reach the containers while leaving `${POSTGRES_PASSWORD}`
+unsubstituted.
+
+Check the configuration is accepted:
+
+```bash
+cd deploy
+docker compose run --rm watcher
+```
+
+That prints a startup line and exits 0, or names the first variable that is wrong and exits 1.
+
+**Do not use `docker compose up` for the watcher service yet.** The binary is not a server
+until T1.9, so it exits as soon as it has printed, and `restart: unless-stopped` will start it
+again immediately — a restart loop that looks like a fault and is not. The database and proxy
+are fine to bring up on their own:
+
+```bash
+docker compose up -d postgres caddy
+docker compose ps
+docker compose logs -f
+docker compose down            # add -v to also drop the database volume
+```
+
+### What the stack is
+
+| Service | Role |
+|---|---|
+| `postgres` | PostgreSQL 16. Not published — nothing outside the network reaches it |
+| `watcher` | The Rust binary. Not published either |
+| `caddy` | The only way in. Terminates TLS, serves the frontend build, proxies `/api` |
+
+Only Caddy publishes ports. That is deliberate: it is what stops the basic auth added in T3.7
+from being bypassed by calling the API directly. Set `WATCHER_DOMAIN` to a real hostname and
+Caddy issues a certificate for it automatically; left as `localhost` it serves plain HTTP,
+which is fine for a laptop and not for a server.
+
+The `/mcp` route is excluded from that basic auth on purpose — a connected assistant
+authenticates with its own token, and a proxy-level challenge would refuse it before that
+token is ever read.
+
+## Running it without containers
+
+```bash
+set -a; . deploy/.env; set +a
+cargo run
+```
+
+Nothing loads `.env` automatically — the configuration comes from the environment and only
+from the environment, so that no secret can arrive from a file someone forgot was there.
+
+## Commands
+
+```bash
+cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --check
+
+# the crate boundaries, which are an architectural requirement rather than a preference
+cargo tree -i tokio -p watcher-ledger
+cargo tree -i sqlx  -p watcher-core
+```
+
+Read those two carefully, because right now a pass looks like a failure. Neither `tokio` nor
+`sqlx` is a dependency of anything yet, so both commands exit 101 with
+`package ID specification ... did not match any packages` — and that is the passing state.
+Once those crates are real dependencies elsewhere in the workspace, a pass prints nothing and
+a failure prints the chain that broke the boundary. Until then the check only tells you the
+dependency is absent, which is a weaker thing than it looks.
+
+## Layout
+
+```
+crates/
+  watcher-core     types, money, trading days, annotation schema, provider traits. No I/O
+  watcher-store    Postgres: migrations, repositories
+  watcher-feeds    price and news providers
+  watcher-llm      model clients
+  watcher-ledger   the paper trading rules, as a pure state machine
+  watcher-agent    context pack, prompts, tool handlers, verdicts, run orchestration
+  watcher-api      axum router, JSON handlers, MCP transport, scheduler
+src/main.rs        configuration and wiring, nothing else
+deploy/            compose.yaml, Caddyfile, .env.example
+doc/               diagrams, schema reference, flows
+```
+
+Dependencies run strictly one way, `core` to `api`, and nothing depends on `watcher-api`.
+Each crate's `lib.rs` says what it may *not* depend on, so the rule travels with the code.
+
+## Documents
+
+Read in this order. Where they disagree, the one higher in this list wins.
+
+| Document | What it is |
+|---|---|
+| [`stock-analyser-product-brief.md`](stock-analyser-product-brief.md) | Why this exists, who for, what would prove it works |
+| [`stock-analyser-requirements.md`](stock-analyser-requirements.md) | What it must do. Every requirement has an id and an acceptance test |
+| [`PLAN.md`](PLAN.md) | How it is built, and why each decision was made over the alternatives |
+| [`doc/`](doc/README.md) | Diagrams, the schema in detail, how a day passes |
+| [`TASKS.md`](TASKS.md) | The build order, and notes on what actually happened |
+
+## Licence
+
+None yet.
