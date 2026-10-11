@@ -94,10 +94,13 @@ impl FetchError {
 
 /// Daily bars for one instrument over a closed date range.
 ///
-/// Static dispatch rather than `dyn`: there are exactly two implementations and the choice is
-/// a configuration value read once at startup (I-31), so the set is closed and an enum in
-/// `watcher-feeds` can dispatch between them. That keeps this crate free of `async-trait` and
-/// keeps the trait readable.
+/// Static dispatch rather than `dyn`: the set of providers is closed and the choice is a
+/// configuration value read once at startup (I-31), so an enum in `watcher-feeds` dispatches
+/// between them. That keeps this crate free of `async-trait` and keeps the trait readable.
+///
+/// Only one provider exists today (A-1's free source). The trait is what makes that a
+/// detail — it is the thing A-1 actually asks for, and it has to be in place *before* the
+/// free endpoint breaks rather than after.
 pub trait PriceSource {
     fn daily_bars(
         &self,

@@ -319,8 +319,18 @@ to drive it — T1.11. The trait uses `impl Future` rather than `dyn`, which is 
 two implementations are chosen by config and an enum in feeds will dispatch between them in
 T1.9.
 
-### [x] T1.9: Paid PriceSource implementation, left unconfigured
-**What:** A second implementation behind the same trait, selected by `PRICE_SOURCE`.
+### [~] T1.9: Paid PriceSource implementation — WITHDRAWN
+**Withdrawn 2026-10-11**, after being built and committed. Free sources only for now; paid
+APIs deferred until needed (`PLAN.md` D15, Changed). The implementation was removed rather than
+left in place unreferenced: it was never verified against the live API — there was no key, so
+it was written from a documented shape — and unverified code that is "ready to swap in" is a
+liability that resembles a mitigation. It is in commit `18b7bd9` if it is ever wanted.
+
+What survives is the part A-1 actually asks for: the `PriceSource` trait, and
+`ConfiguredPriceSource` as the one place that names a provider. Adding a second one is a
+variant and a config value. Verified that nothing outside `watcher-feeds` names a provider.
+
+**What was:** A second implementation behind the same trait, selected by `PRICE_SOURCE`.
 **Why:** `PLAN.md` D15. §11 needs 14 *consecutive* days; a free endpoint breaking on day
 nine means starting the count again. Written now, the swap is one environment variable.
 **How:** Same trait, no other code aware of which is live. Do not configure it.

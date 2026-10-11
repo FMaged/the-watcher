@@ -327,16 +327,24 @@ wire (D-3). `kind` is one of the six allowed values; `low`/`high` are set for zo
 - **N-43 stays testable** without login: insert a second user row and assert every query
   scopes by owner.
 
-### D15: One price trait, free source live, paid source written and idle
-- **Choice:** `trait PriceSource` in `watcher-core`. The free implementation is configured; a
-  paid implementation is written in M0 and left unconfigured. Swapping is one environment
-  variable.
-- **Why:** A-1 and the brief's own risk entry. §11 needs 14 *consecutive* trading days, so a
-  provider breaking on day nine means starting the count again. Having the replacement already
-  written turns that from a rebuild into a restart.
+### D15: One price trait, one free source
+- **Choice:** `trait PriceSource` in `watcher-core`, with a single free implementation behind
+  it. Adding a provider means a variant in `watcher-feeds` and a configuration value, and
+  nothing else.
+- **Why:** A-1 asks for the *interface*, not for a second implementation: "if it stops being
+  free or available, the system must keep working with a paid source behind the same
+  interface." The trait is what satisfies that, and it has to exist before the free endpoint
+  breaks rather than after.
 - **Alternatives:** paid from day one — no breakage risk, a monthly cost before any revenue.
-  Free only — least code, and the acceptance test is hostage to an unofficial endpoint.
+  Two implementations from the start — see Changed, below.
 - **Per I-12:** a failure retries, then records a failed fetch. It never writes a guessed bar.
+- **Changed (2026-10-11):** was "free source live, paid source written and idle", and the paid
+  implementation was built in T1.9 and then removed. Two reasons. The owner's call is to defer
+  paid APIs until they are needed. And the implementation could not be verified — there was no
+  API key, so it was written from a documented response shape, and unverified code that is
+  "ready to swap in" is not a mitigation but a liability that resembles one. Writing the second
+  provider at the moment it is needed, against a key that can confirm it, is better than
+  writing it blind now. It is recoverable from commit `18b7bd9` if that moment comes.
 
 ### D16: The trading calendar is data, seeded by migration
 - **Choice:** a `trading_calendar` table covering 2026–2030, including half-days, inserted by
