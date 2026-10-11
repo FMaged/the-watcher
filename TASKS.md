@@ -225,12 +225,44 @@ INSERT in 0009; that is now on 0009's list in a comment.
 by hand with `psql`. F-2's 50-ticker cap is left to the application, because the requirement
 asks for a refusal that explains why and a constraint violation explains nothing.
 
-### [ ] T1.7: Migration 0004 — market data tables
+### [x] T1.7: Migration 0004 — market data tables
 **What:** `price_bar`, `corporate_action`, `news_item`.
 **Why:** I-11 — raw prices are stored, adjusted prices are never the source of truth because
 they change retroactively.
 **How:** Natural primary key `(instrument_id, bar_date)`. No adjusted-price column exists.
-**Notes:** _(added after implementation)_
+**Notes:** Done, verified against a throwaway cluster. All four migrations apply from empty.
+No `adjusted` column exists on `price_bar` and no article-text column on `news_item` — checked
+by querying `information_schema`, not by reading the file.
+
+**A real bug, found by testing rather than by reading: a split with no ratio was accepted.**
+The constraint said `split_from > 0 AND ...`, and with `split_from` NULL that evaluates to
+NULL — a CHECK only rejects a row when it is FALSE, so the whole chain passed. The dividend
+check had the same hole. Both now state the null case explicitly, and the six cases are
+verified: a valid split and dividend still work; no ratio, half a ratio, a zero ratio and a
+dividend with no amount are all refused. The comment in the file explains why the IS NOT NULL
+tests are not redundant, because they look redundant and someone will try to tidy them away.
+Editing 0004 was fine here — it was uncommitted and had only ever run on a cluster I deleted,
+which is the line the forward-only rule actually draws.
+
+**This also caught a bug waiting in 0006.** `doc/database.md` had the corporate-action trigger
+reading `pay_date`, but only a dividend has one: a split would have written NULL into a NOT
+NULL column and every split would have failed to apply. It now reads
+`coalesce(pay_date, ex_date)`, and the column comment in 0004 says so where whoever writes
+0006 will be looking.
+
+**One deliberate absence: no foreign key from `price_bar` to `trading_calendar`.** A bar should
+only exist on a session, but the calendar is seeded from 2026 while the first chart needs a
+year of history behind it (F-30) — so bars will predate the seed on day one. Verified that a
+2025 bar inserts. A constraint that made historical loading impossible is a constraint we
+would remove under pressure, which is worse than not having it.
+
+Also verified: the OHLC coherence checks refuse a high below the low, a low above the open, a
+close above the high, a zero price and a negative volume; the natural keys refuse the same bar
+twice, the same split twice and the same URL twice; `ON CONFLICT DO NOTHING` leaves the
+original row untouched on a second insert, which is the nightly ingest pattern (F-101); and
+0001's default privileges gave all three tables `INSERT, SELECT` and nothing more, which is
+exactly right for data that is fetched once and never revised. Nothing here goes on 0009's
+grant list.
 
 ### [ ] T1.8: PriceSource trait and the free implementation
 **What:** The trait in `watcher-core`, a free-source implementation in `watcher-feeds`.

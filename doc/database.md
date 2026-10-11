@@ -91,7 +91,12 @@ than that. The trigger on `ledger_entry` is conditional:
 
 ```sql
 IF NEW.corporate_action_id IS NOT NULL THEN
-  NEW.trading_day := (SELECT pay_date FROM corporate_action WHERE id = NEW.corporate_action_id);
+  -- coalesce, not pay_date: only a dividend has a pay date. A split carries an ex-date and
+  -- nothing else, so reading pay_date alone would write NULL into a NOT NULL column and
+  -- every split would fail to apply.
+  NEW.trading_day := (
+    SELECT coalesce(pay_date, ex_date) FROM corporate_action WHERE id = NEW.corporate_action_id
+  );
 ELSE
   NEW.trading_day := (NEW.created_at AT TIME ZONE 'America/New_York')::date;
 END IF;
