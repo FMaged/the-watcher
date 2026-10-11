@@ -10,6 +10,8 @@ by reviewing code.
 ```mermaid
 flowchart TD
     MAIN["src/main.rs<br/>config + wiring, nothing else"] --> API
+    MAIN --> STORE
+    MAIN --> FEEDS
     API["watcher-api<br/>axum router, JSON handlers,<br/>MCP transport, scheduler"] --> AGENT
     API --> STORE
     API --> LEDGER
@@ -27,6 +29,12 @@ flowchart TD
 Nothing depends on `watcher-api`. `watcher-ledger` depends on `watcher-core` alone, which is
 what **N-56** means by "the ledger rules are testable without a database".
 
+`src/main.rs` reaches past `watcher-api` to `watcher-store` and `watcher-feeds`, and only
+there: it is the composition root, so it is the one file that opens the pool, applies the
+migrations and decides which price source is live. The alternative was `watcher-api` naming a
+provider itself, which is exactly the edge **N-54** exists to prevent — a handler that knows
+which endpoint the prices came from. Everything below `main` is handed what it needs.
+
 ### What each crate may not do
 
 | Crate | Forbidden |
@@ -34,6 +42,7 @@ what **N-56** means by "the ledger rules are testable without a database".
 | `watcher-core` | any I/O — no `sqlx`, no `reqwest`, no `tokio` |
 | `watcher-ledger` | any I/O, and reading the clock. Time arrives as an argument |
 | `watcher-store` | HTTP calls to providers. It talks to Postgres only |
+| `watcher-api` | holding sqlx. The pool arrives as `watcher_store::Db` and every query is a function in that crate |
 | `watcher-feeds` | touching analyses, orders or pages (N-54) |
 | `watcher-llm` | deciding anything. It transports requests and returns responses |
 | `watcher-agent` | serving HTTP. It knows nothing about axum |

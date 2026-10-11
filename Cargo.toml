@@ -19,4 +19,10 @@ name = "watcher"
 path = "src/main.rs"
 
 [dependencies]
+# The composition root needs the three crates whose implementations it chooses between: the
+# router to serve, the pool and migrations to open, and the price source to build. Nothing
+# depends on watcher-api, and this is the only file that reaches past it.
+tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros"] }
 watcher-api = { path = "crates/watcher-api" }
+watcher-feeds = { path = "crates/watcher-feeds" }
+watcher-store = { path = "crates/watcher-store" }

@@ -11,7 +11,7 @@ A promise that history is never rewritten is worth less than a database that can
 
 ```mermaid
 flowchart LR
-    APP["watcher binary"] -->|"DATABASE_URL"| R1["role: watcher_app<br/>SELECT, INSERT by default<br/>UPDATE/DELETE only where<br/>0009 grants it explicitly"]
+    APP["watcher binary"] -->|"DATABASE_URL"| R1["role: watcher_app<br/>SELECT, INSERT by default<br/>UPDATE/DELETE only where<br/>a grant says so explicitly"]
     MIG["migrations"] -->|"MIGRATE_DATABASE_URL"| R2["role: watcher_owner<br/>owns every object<br/>full DDL"]
     R1 --> DB[("the_watcher")]
     R2 --> DB
@@ -39,7 +39,8 @@ ALTER DEFAULT PRIVILEGES FOR ROLE watcher_owner IN SCHEMA public
 **UPDATE and DELETE are absent on purpose, and that inverts the failure mode.** Any table a
 later migration creates is automatically readable and insertable by the application and
 nothing more, so append-only is what happens when nobody does anything. The few tables that
-genuinely need UPDATE become the exception, written down in 0009.
+genuinely need UPDATE become the exception, each written down in a migration of its own
+(0005 is the first) and gathered up by the grants migration that runs last.
 
 The earlier design here granted everything and revoked it per table, which meant adding an
 append-only table and forgetting the revoke handed out too much. Forgetting now hands out too
@@ -249,20 +250,30 @@ Forward only. A migration is never edited after it has run anywhere.
 | 0002 | `core.sql` | `app_user`, `api_token`, `instrument`, `watchlist_item`, `portfolio` |
 | 0003 | `calendar.sql` | `trading_calendar` **plus its seed data**, 2026–2030 (**D-15**) |
 | 0004 | `market_data.sql` | `price_bar`, `corporate_action`, `news_item` |
-| 0005 | `runs.sql` | `run`, `analysis`, `annotation`, `raw_model_output`, `news_take`, the `set_trading_day` trigger |
-| 0006 | `ledger.sql` | `paper_order`, `position`, `ledger_entry`, `snapshot`, `benchmark_basket` |
-| 0007 | `verdicts.sql` | `call_verdict` |
-| 0008 | `chat_cost.sql` | `chat_message`, `model_call` |
-| 0009 | `grants.sql` | grants, then the **D-12** revokes. **Last, so it covers everything** |
+| 0005 | `watchlist_grant.sql` | `UPDATE (removed_on)` on `watchlist_item` — the first exception the code reached (**F-3**) |
+| 0006 | `runs.sql` | `run`, `analysis`, `annotation`, `raw_model_output`, `news_take`, the `set_trading_day` trigger |
+| 0007 | `ledger.sql` | `paper_order`, `position`, `ledger_entry`, `snapshot`, `benchmark_basket` |
+| 0008 | `verdicts.sql` | `call_verdict` |
+| 0009 | `chat_cost.sql` | `chat_message`, `model_call` |
+| 0010 | `grants.sql` | the remaining grants and the **D-12** revokes. **Last, so it covers everything above it** |
 
 0003 carrying its own seed data is deliberate: the calendar is reference data, not fixtures.
 **N-3** ("a run on Thanksgiving completes and records no fills") and the `trading_day`
 trigger both need a calendar that tests can rely on and that cannot change under them at
 runtime.
 
-0009 being last matters. A grant written inside each table's migration drifts the moment
-someone adds a table and forgets; one grants migration at the end, re-run as the schema
-grows, cannot.
+The grants migration being last matters. A grant written inside each table's migration drifts
+the moment someone adds a table and forgets; one grants migration at the end, re-run as the
+schema grows, cannot.
+
+**It cannot be the only one, though, and 0005 is why.** Migrations apply in order, so a
+privilege the code needs *today* cannot live in a file numbered after tables that have not been
+written yet. The watchlist endpoints (T1.10) needed `UPDATE (removed_on)` on `watchlist_item`
+before any of 0006–0009 existed, so that one grant took the next number and the rest shifted
+down by one. The rule this leaves: **a table's exception grants land no later than the code
+that needs them**, in their own small migration when the grants file is still ahead of them,
+and the grants file covers everything that is already there when it runs. Notes written before
+this point call the grants migration 0009; it is 0010.
 
 ## Retention
 

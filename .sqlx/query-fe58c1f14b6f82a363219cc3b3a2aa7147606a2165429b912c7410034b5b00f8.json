@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT i.ticker, w.added_on\n          FROM watchlist_item w\n          JOIN instrument i ON i.id = w.instrument_id\n         WHERE w.user_id = $1\n           AND w.removed_on IS NULL\n         ORDER BY i.ticker\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "ticker",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "added_on",
+        "type_info": "Date"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "fe58c1f14b6f82a363219cc3b3a2aa7147606a2165429b912c7410034b5b00f8"
+}

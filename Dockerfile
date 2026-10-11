@@ -3,6 +3,12 @@
 FROM rust:1.91-slim-bookworm AS build
 WORKDIR /src
 COPY . .
+# sqlx checks every query against a real schema at compile time. There is no database in a
+# build, so it checks against the committed .sqlx cache instead — which is also why that
+# directory is in version control and why changing a query means re-running
+# `cargo sqlx prepare`. Without this the build would try to connect to DATABASE_URL and fail
+# in a way that reads like a missing variable rather than a stale cache.
+ENV SQLX_OFFLINE=true
 # --locked so the image is built from the committed Cargo.lock and not a fresh resolution.
 RUN cargo build --release --locked --bin watcher
 

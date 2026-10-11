@@ -30,15 +30,25 @@ Early. The planning documents are complete and the first three tasks are done.
 | T1.7 | Market data tables: prices, corporate actions, news |
 | T1.8 | PriceSource trait and the free implementation |
 | T1.9 | *Withdrawn* — free sources only for now, paid deferred |
+| T1.10 | Watchlist endpoints, the HTTP server, and migrations applied at startup |
 
-**What the binary does today:** reads its configuration, validates it, prints one line and
-exits. There is no HTTP server yet (T1.9), no database schema (T1.4) and no agent (Stage 2).
-See [`TASKS.md`](TASKS.md) for what is next.
+**What the binary does today:** reads its configuration, applies any migration that has not
+run, and serves the watchlist. There is no agent yet (Stage 2), no nightly job (T1.11) and no
+`/health` (T1.12), so nothing accrues on its own.
+
+| Method | Path | |
+|---|---|---|
+| GET | `/api/watchlist` | the active watchlist, with the F-2 limit beside the count |
+| POST | `/api/watchlist` | add a ticker. Confirmed against the price source first |
+| DELETE | `/api/watchlist/{ticker}` | remove it, keeping every analysis and trade (F-3) |
+
+Every answer is JSON, failures included: `{"error":{"code":…,"message":…}}`, with a code
+stable enough to branch on and a message a person can read.
 
 The stack has been built and run: the image is 127MB and runs as uid 10001, `initdb` creates
-the restricted role, all three migrations apply, and Caddy routes `/api`, `/health` and `/mcp`
-to the binary (502 until T1.9) while serving the frontend volume at `/`. What has *not* been
-proven is the VPS of C-18 — this was a laptop — and the restore drill of N-21.
+the restricted role, the migrations apply, and Caddy routes `/api`, `/health` and `/mcp` to the
+binary while serving the frontend volume at `/`. What has *not* been proven is the VPS of
+C-18 — this was a laptop — and the restore drill of N-21.
 
 ## Running the containers
 
@@ -61,20 +71,18 @@ cd deploy
 docker compose run --rm watcher
 ```
 
-That prints a startup line and exits 0, or names the first variable that is wrong and exits 1.
-
-**Do not use `docker compose up` for the watcher service yet.** The binary is not a server
-until T1.9, so it exits as soon as it has printed, and `restart: unless-stopped` will start it
-again immediately — a restart loop that looks like a fault and is not. The database and proxy
-are fine to bring up on their own, and Caddy deliberately does not depend on the API so that
-this really does leave the watcher service alone:
+That names the first variable that is wrong and exits 1, or starts serving. Then the stack:
 
 ```bash
-docker compose up -d postgres caddy
+docker compose up -d
 docker compose ps
 docker compose logs -f
 docker compose down            # add -v to also drop the database volume
 ```
+
+The binary applies the migrations itself, as the owner role, before it starts listening. A
+first `up` against an empty volume therefore builds the whole schema; a later one applies
+whatever is new and nothing else.
 
 ### What the stack is
 
@@ -128,14 +136,31 @@ cargo fmt --check
 # the crate boundaries, which are an architectural requirement rather than a preference
 cargo tree -i tokio -p watcher-ledger
 cargo tree -i sqlx  -p watcher-core
+cargo tree -i reqwest -p watcher-store
 ```
 
-Read those two carefully, because right now a pass looks like a failure. Neither `tokio` nor
-`sqlx` is a dependency of anything yet, so both commands exit 101 with
-`package ID specification ... did not match any packages` — and that is the passing state.
-Once those crates are real dependencies elsewhere in the workspace, a pass prints nothing and
-a failure prints the chain that broke the boundary. Until then the check only tells you the
-dependency is absent, which is a weaker thing than it looks.
+Those three still *pass* by failing: each exits 101 with
+`package ID specification ... did not match any packages`, which is the only way cargo says
+"that dependency is not reachable from here". `sqlx` and `tokio` are now real dependencies
+elsewhere in the workspace, so the question they ask is a real one — if the ledger ever grows
+a runtime or `watcher-core` an sqlx mapping, these print the chain that did it.
+
+### Queries are checked at compile time
+
+sqlx checks every query against a real schema while compiling, and a build has no database. It
+uses the committed `.sqlx/` cache instead, which is why `SQLX_OFFLINE=true` is set in the
+Dockerfile and why **changing a query means regenerating the cache**:
+
+```bash
+cargo install sqlx-cli --version 0.8.6 --no-default-features --features rustls,postgres
+export DATABASE_URL=...        # a database with the migrations applied
+cargo sqlx prepare --workspace -- --all-targets
+```
+
+Forgetting that step fails the build with a query that "is not found in the offline cache",
+not with anything about the schema — so it is worth recognising. `cargo test` and
+`cargo clippy` work either way: with `DATABASE_URL` set they check against that database, and
+with `SQLX_OFFLINE=true` against the cache.
 
 ## Layout
 

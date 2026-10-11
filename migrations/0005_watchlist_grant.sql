@@ -1,0 +1,18 @@
+-- 0005_watchlist_grant.sql — the one privilege the watchlist endpoints need.
+--
+-- 0001 set default privileges to SELECT, INSERT only, so every table starts append-only and
+-- the exceptions are written down one at a time. F-3 is the first exception the code reaches:
+-- removing a ticker must *hide* it and keep every analysis, annotation and trade, so removal
+-- sets `removed_on` and never deletes a row — and that is an UPDATE.
+--
+-- Column-level, not table-level. `GRANT UPDATE ON watchlist_item` would also let the
+-- application move `added_on` or re-point `instrument_id`, which would rewrite when a ticker
+-- was watched and what it was. Naming the column means the only field the application can
+-- ever change is the one F-3 asks for; everything else about a membership period is as
+-- immutable as the rows the D-12 tables hold.
+--
+-- Why this is not in the grants migration that doc/database.md plans for last: migrations
+-- apply in order, so a privilege the code needs today cannot live in a file numbered after
+-- the tables that have not been written yet. The later tables now carry their own exception
+-- grants, which doc/database.md records.
+GRANT UPDATE (removed_on) ON watchlist_item TO watcher_app;

@@ -6,4 +6,17 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
+# 0.8 rather than 0.9: sqlx 0.9 requires rustc 1.94 and the workspace is pinned to 1.91.
+# default-features off keeps the MySQL and SQLite drivers out, and rustls keeps OpenSSL off
+# the runtime image.
+sqlx = { version = "0.8.6", default-features = false, features = [
+  "runtime-tokio",
+  "tls-rustls",
+  "postgres",
+  "macros",
+  "migrate",
+  "time",
+] }
+thiserror = "2.0.21"
+time = { version = "0.3.55", default-features = false, features = ["std"] }
 watcher-core = { path = "../watcher-core" }

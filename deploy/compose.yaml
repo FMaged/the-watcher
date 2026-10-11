@@ -33,9 +33,9 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile
-    # unless-stopped restarts on any exit, success included. Until T1.9 gives the binary an
-    # HTTP server it prints its startup line and exits 0, so `up` on this service is a
-    # restart loop that looks like a fault and is not. Use `run --rm watcher` to check config.
+    # unless-stopped restarts on any exit, success included — which is what you want for a
+    # server, and which is also why a configuration error shows up as a restart loop rather
+    # than a stopped container. `run --rm watcher` is the way to see that error once.
     restart: unless-stopped
     env_file: ./.env
     depends_on:

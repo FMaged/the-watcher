@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE watchlist_item\n           SET removed_on = (now() AT TIME ZONE 'America/New_York')::date\n         WHERE user_id = $1\n           AND removed_on IS NULL\n           AND instrument_id = (SELECT id FROM instrument WHERE ticker = $2)\n        RETURNING removed_on AS \"removed_on!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "removed_on!",
+        "type_info": "Date"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "c8352cb918f53b62cd405b250d595dce98fb98b026779a12e48aa6179b4cab24"
+}

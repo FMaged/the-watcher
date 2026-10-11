@@ -373,12 +373,112 @@ moment is T1.11, when the nightly job needs a source constructed and `main` beco
 composition root. Until then `ConfiguredPriceSource::from_config` is the only thing that knows
 the names, and it is tested.
 
-### [ ] T1.10: Watchlist endpoints
+### [x] T1.10: Watchlist endpoints
 **What:** `GET`/`POST`/`DELETE /api/watchlist`.
 **Why:** F-1, F-2, F-3.
 **How:** Validate against the instrument list, refuse the 51st ticker with a reason, and make
 removal set `removed_on` rather than delete — F-3 keeps the history of a removed ticker.
-**Notes:** _(added after implementation)_
+**Notes:** Done. Three endpoints, and with them the first of several things that had to exist
+before any endpoint could: sqlx in `watcher-store`, a pool, a migration runner, an axum server,
+and an error shape. Twelve new tests in `watcher-api`, 65 in the workspace, clippy clean.
+`DELETE` takes the ticker in the path, as `PLAN.md`'s API table says, rather than in a body as
+the line above implies.
+
+**Verified end to end against a throwaway PostgreSQL 17 cluster**, torn down afterwards, with
+the binary doing the work rather than psql: migrations applied from an empty database at
+startup (`_sqlx_migrations` holds all five), ` aapl ` normalised to `AAPL` and confirmed
+against the real free endpoint, `ZZZZZ` refused as an unknown symbol, and SIGTERM shutting the
+server down cleanly. The full transcript of what was exercised is below, because this is the
+first task whose behaviour is not provable by unit tests alone.
+
+**How a ticker is validated, which the task did not say and the schema could not answer.** F-1
+validates against the instrument list; the instrument list was empty and nothing seeded it.
+The options were a committed list of US symbols, a shape-only check, or asking the price
+source. **Asked and chose the price source** (`PLAN.md` D15's trait, already returning
+`UnknownSymbol` as a tested outcome): an unknown ticker is refused at the moment it is typed,
+and a confirmed one is written into `instrument` and never asked about again, so the list means
+"symbols something confirmed trade" and grows instead of going stale. A committed list is wrong
+the month after it is written, and a shape-only check would have made the nightly job record a
+failed fetch every night for a typo — which looks like a degrading provider rather than a
+mistake someone made once.
+
+The cost is one HTTP request on the first add of a symbol, and it is ordered deliberately:
+**F-2's cap is checked before the provider is asked**, so a full watchlist answers
+`watchlist_full` even for a symbol nobody has heard of. Confirmed by adding 50 tickers and then
+asking for `ZZZZY`: the answer is the cap, and no `instrument` row is created for a symbol that
+was refused.
+
+**Migration 0005, and why the grants migration is no longer 0009.** Removal needs
+`UPDATE` on `watchlist_item`, which `doc/database.md` had planned for one grants migration
+running last. Migrations apply in order, so a privilege the code needs today cannot live in a
+file numbered after tables that do not exist yet. **Asked, and the narrow option was chosen:**
+0005 grants that one privilege, the planned table migrations shift down by one, and the grants
+file stays last at 0010 covering everything before it. Notes in earlier tasks that say "0009's
+grant list" mean the grants migration; it is 0010 now. `doc/database.md` records the rule that
+falls out of this: a table's exception grants land no later than the code that needs them.
+
+The grant is **column-level** — `GRANT UPDATE (removed_on)` — which is better than what was
+planned. Table-level UPDATE would also let the application move `added_on` or re-point
+`instrument_id`, rewriting when a ticker was watched and what it was. Proven as the app role:
+setting `removed_on` works, setting `added_on` is `permission denied`, re-pointing
+`instrument_id` is `permission denied`, and `DELETE` is refused on both `watchlist_item` and
+`instrument`.
+
+**The same-day re-add, which the membership-period key makes interesting.** The primary key is
+`(user_id, instrument_id, added_on)` (Review 1, finding 1), so a ticker added, removed and
+added again *on the same day* cannot be two rows — the second period would start on the day the
+first ended. Rather than refuse it, the insert clears that row's `removed_on`: within one day it
+is someone undoing a misclick, no scheduled run has happened in between, and the alternative
+message is "you can have it back tomorrow". A removal from any *earlier* day behaves as F-3
+intends, and both were checked: September's period and today's coexist as two rows, and a
+re-add on the removal day leaves one active row.
+
+**N-43 without login.** Every query takes a `user_id` and the id is state on the handler rather
+than a default inside the queries, so a query that forgot to scope is visible as a missing
+parameter. Checked the way the requirement asks: a second user with `NVDA` on their watchlist
+is in the table and absent from the response.
+
+**Things decided while writing it, worth knowing.**
+
+- **`watcher-api` does not depend on sqlx.** The pool arrives as `watcher_store::Db` and every
+  query is a function in the store, so "the store talks to Postgres only" is readable from a
+  manifest. Checked: `cargo tree -i sqlx -p watcher-api` reaches it only through
+  `watcher-store`, and no crate outside it names sqlx.
+- **`src/main.rs` reaches past `watcher-api` to the store and the feeds.** T1.9's notes
+  predicted this for T1.11 and it arrived here, because the endpoint needs a price source.
+  It is the composition root and the only file that knows which implementations are live;
+  `doc/architecture.md`'s graph now shows those two edges.
+- **Queries are compile-time checked, which needs the `.sqlx` cache in the repository.** A
+  Docker build has no database, so `SQLX_OFFLINE=true` is set in the Dockerfile and changing a
+  query means re-running `cargo sqlx prepare`. The README says so, because the failure
+  otherwise reads as a missing variable rather than a stale cache.
+- **Errors are one envelope, including the ones axum writes.** `{"error":{"code":…,"message":…}}`,
+  with unmatched paths and wrong methods given the same shape — an empty 404 body is not HTML
+  and still breaks a client that reads `error.code` on every failure. A database or provider
+  error is logged and replaced: a sqlx error can name a host or a role (N-40), and a rejected
+  body is never quoted back (A-4). There are tests for both.
+- **`instrument.name` is the ticker.** Nothing in the system knows a company's name — the price
+  trait returns bars (I-10) — and the column is `NOT NULL`, so the choice was the symbol or an
+  invented name. It is the symbol, in one documented place, and the API does not return the
+  field at all so that nothing displays it as though it were real.
+- **The port is not configurable.** Caddy is the only way in (C-21, C-22) and the compose file
+  does not publish 8080, so a variable here would be one more thing that has to agree with the
+  Caddyfile.
+
+**Not done, deliberately.**
+
+- **No database-backed tests.** The `#[sqlx::test]` harness is T1.13, and it needs a role that
+  may create databases, which `watcher_owner` does not have. Today's database behaviour — the
+  cap, both removal cases, scoping, the privilege model — was checked by hand with `curl` and
+  `psql` and written down above. That is weaker than a test, and T1.13 is where it stops being
+  a transcript.
+- **`GET` does not return the last analysis date** that `PLAN.md`'s API table promises. There is
+  no `analysis` table until M1; the field is left out rather than sent as a permanent `null`,
+  so adding it later is additive and no frontend can come to depend on its being null.
+- **The core types still have no serde** (T3.1), so tickers and dates go out as strings via
+  `Display`. No money crosses this endpoint, so the `price_scale` question does not arise yet.
+- **Nothing guards the endpoints.** Basic auth is Caddy's job in T3.7 and the port is not
+  published, so the API is reachable only from inside the compose network until then.
 
 ### [ ] T1.11: Nightly job — calendar check, price ingest, snapshot
 **What:** Scheduler in `watcher-api`, job logic in `watcher-agent`. Holiday check, bar
@@ -435,7 +535,7 @@ deserialization error before any validation runs (F-21).
 **stored and flagged**, never rejected, and the flag is counted so the threshold can be tuned.
 **Notes:** _(added after implementation)_
 
-### [ ] T2.3: Migration 0005 — runs, analyses, annotations, raw output, and the trigger
+### [ ] T2.3: Migration 0006 — runs, analyses, annotations, raw output, and the trigger
 **What:** `run`, `analysis`, `annotation`, `raw_model_output`, `news_take`, plus the
 `set_trading_day` BEFORE INSERT trigger.
 **Why:** F-14, D-11, D-14.
@@ -489,15 +589,15 @@ recorded failure. A failed run never replaces the last good analysis. Earlier ve
 reachable.
 **Notes:** _(added after implementation)_
 
-### [ ] T2.9: Migration 0008, cost recording and the cap
+### [ ] T2.9: Migration 0009, cost recording and the cap
 **What:** `model_call`, spend recorded per call, and the daily cap checked **before** a run
 starts.
 **Why:** N-30, N-34, N-61, F-95.
 **How:** A user at their cap produces no model spend at all that day. Count input tokens per
 request — without it the §11 token-budget box cannot be ticked honestly.
-**Deviation from `PLAN.md`:** its migration table has 0008 creating both `model_call` and
-`chat_message`. `model_call` is needed now and chat is not, so 0008 covers `model_call` only
-and `chat_message` moves to 0010 in T5.3. Update the table in `doc/database.md`.
+**Deviation from `PLAN.md`:** its migration table has one file creating both `model_call` and
+`chat_message`. `model_call` is needed now and chat is not, so 0009 covers `model_call` only
+and `chat_message` moves to 0011 in T5.3. Update the table in `doc/database.md`.
 **Notes:** _(added after implementation)_
 
 ### [ ] T2.10: Hosted runner — single shot through the batch route
@@ -629,7 +729,7 @@ together must fill until cash runs out, then reject — `apply` advances the sta
 each, so the later decisions see the earlier fills.
 **Notes:** _(added after implementation)_
 
-### [ ] T4.3: Migration 0006 — orders, positions, ledger, snapshots, basket
+### [ ] T4.3: Migration 0007 — orders, positions, ledger, snapshots, basket
 **What:** `paper_order`, `position`, `ledger_entry`, `snapshot`, `benchmark_basket`, the
 natural-key unique index, and the conditional `trading_day` trigger.
 **Why:** D-2, D-13, and D-11's corporate-action exception.
@@ -711,9 +811,9 @@ If the news source fails, the rest of the analysis still runs and the panel expl
 outside the 14-day window are not sent to the model.
 **Notes:** _(added after implementation)_
 
-### [ ] T5.3: Migration 0010 — chat messages
+### [ ] T5.3: Migration 0011 — chat messages
 **What:** `chat_message`.
-**Why:** F-50. Split out of 0008 in T2.9.
+**Why:** F-50. Split out of 0009 in T2.9.
 **How:** No column anywhere for income, savings, risk tolerance or goals — D-8 and C-2 mean
 the schema must make storing them impossible, not merely discouraged.
 **Notes:** _(added after implementation)_
@@ -727,7 +827,7 @@ my money" questions with a refusal plus general information, and never ask for p
 circumstances.
 **Notes:** _(added after implementation)_
 
-### [ ] T5.5: Migration 0007 and the verdict rules
+### [ ] T5.5: Migration 0008 and the verdict rules
 **What:** `call_verdict`, and the per-kind rules from `doc/ledger.md`.
 **Why:** F-84.
 **How:** `UNIQUE (subject_kind, subject_id, as_of)`. `event` gets **no verdict** — a marker
