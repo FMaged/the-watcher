@@ -52,15 +52,23 @@ CREATE TABLE instrument (
 CREATE TABLE watchlist_item (
   user_id       text   NOT NULL REFERENCES app_user (id),
   instrument_id bigint NOT NULL REFERENCES instrument (id),
-  added_on      date   NOT NULL DEFAULT current_date,
+  added_on      date   NOT NULL DEFAULT (now() AT TIME ZONE 'America/New_York')::date,
   -- F-3: removing a ticker hides it from the watchlist and keeps every analysis, annotation
   -- and trade. So removal sets a date; it never deletes a row.
   removed_on    date,
-  PRIMARY KEY (user_id, instrument_id),
+
+  -- One row per *membership period*, not one per ticker. Keying on (user, instrument) alone
+  -- would mean adding a removed ticker back could only be an UPDATE setting removed_on to
+  -- NULL — which erases the fact it was ever removed, and that history is what F-3 exists to
+  -- keep. A ticker watched, dropped and picked up again is three facts, so it is three rows.
+  PRIMARY KEY (user_id, instrument_id, added_on),
   CONSTRAINT watchlist_item_removed_after_added CHECK (removed_on IS NULL OR removed_on >= added_on)
 );
 
-CREATE INDEX watchlist_item_active ON watchlist_item (user_id) WHERE removed_on IS NULL;
+-- At most one *active* period per ticker. The partial unique index is what stops the same
+-- ticker being watched twice at once, now that the primary key no longer does.
+CREATE UNIQUE INDEX watchlist_item_one_active
+  ON watchlist_item (user_id, instrument_id) WHERE removed_on IS NULL;
 
 COMMENT ON TABLE watchlist_item IS
   'F-2 caps a watchlist at 50 active tickers. That limit is enforced by the application '
@@ -87,7 +95,19 @@ COMMENT ON COLUMN portfolio.cash_minor IS
 -- code path that exists only to insert two rows.
 --
 -- F-60: a new portfolio always starts at exactly 10,000 USD. That is 1,000,000 cents.
-INSERT INTO app_user (id, label) VALUES ('us_0000000000000000000000001', 'owner');
+-- The ids are 26 characters after the prefix, the length of a ULID, so that the two seeded
+-- rows are not the only ids in the system that would fail a format check if one is ever
+-- added. Zeros sort before any real ULID, which is also correct: these are the first rows.
+INSERT INTO app_user (id, label)
+VALUES ('us_00000000000000000000000001', 'owner');
 
+-- The New York date, not the server's. In a UTC container `current_date` is a day ahead of
+-- New York between 00:00 and 04:00 UTC, and this column is what F-82's frozen benchmark is
+-- anchored to — a day out there shifts the basket by a session, permanently.
 INSERT INTO portfolio (id, user_id, cash_minor, created_on)
-VALUES ('pf_0000000000000000000000001', 'us_0000000000000000000000001', 1000000, current_date);
+VALUES (
+  'pf_00000000000000000000000001',
+  'us_00000000000000000000000001',
+  1000000,
+  (now() AT TIME ZONE 'America/New_York')::date
+);

@@ -40,6 +40,27 @@ CREATE TABLE price_bar (
   )
 );
 
+-- A bar cannot exist for a day that has not closed yet. Nothing in the constraints above
+-- catches it: they check prices against each other, not against the calendar.
+--
+-- This matters more than it looks. A future-dated bar becomes the "last close" that F-23's
+-- annotation warning threshold is measured against, and it appears on the chart as fact. The
+-- date also cannot be checked with a CHECK constraint — `current_date` is STABLE, not
+-- IMMUTABLE, and Postgres refuses it there (see doc/database.md) — so this is a trigger,
+-- which is stronger anyway: a check refuses a bad write, a trigger makes one impossible.
+CREATE FUNCTION reject_future_bar() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  -- The New York date, because that is the calendar the bars belong to (D-4).
+  IF NEW.bar_date > (now() AT TIME ZONE 'America/New_York')::date THEN
+    RAISE EXCEPTION 'price bar for % is in the future', NEW.bar_date;
+  END IF;
+  RETURN NEW;
+END $$;
+
+CREATE TRIGGER price_bar_not_in_the_future BEFORE INSERT ON price_bar
+  FOR EACH ROW EXECUTE FUNCTION reject_future_bar();
+
 COMMENT ON TABLE price_bar IS
   'Raw OHLCV, exactly as the provider gave it. I-11: adjusted prices are never the source of '
   'truth, because they are recomputed whenever a split or dividend happens — a stored '

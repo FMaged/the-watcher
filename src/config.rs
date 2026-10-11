@@ -82,6 +82,29 @@ impl Config {
                 expected: "a percentage between 1 and 100",
             });
         }
+        // A fat-fingered spread parses perfectly and then makes every fill worse than the
+        // open for as long as nobody notices — which looks like bad luck rather than a typo,
+        // and the paper record is the one thing that must not be quietly wrong. 1000 bps is
+        // 10%, far beyond anything real, so the bound only catches mistakes.
+        if self.half_spread_bps > 1_000 {
+            return Err(ConfigError::Unparsable {
+                key: "HALF_SPREAD_BPS",
+                expected: "basis points up to 1000, which is already 10%",
+            });
+        }
+        // 100 USD a trade. C-19's value is 1 USD.
+        if self.fee_cents > 10_000 {
+            return Err(ConfigError::Unparsable {
+                key: "FEE_CENTS",
+                expected: "a fee under 100 USD",
+            });
+        }
+        if self.chat_cap_per_day == 0 {
+            return Err(ConfigError::Unparsable {
+                key: "CHAT_CAP_PER_DAY",
+                expected: "at least 1, or chat is unusable rather than capped",
+            });
+        }
         Ok(())
     }
 }
@@ -260,6 +283,32 @@ mod tests {
         c.database_url = Secret("mysql://watcher@db/the_watcher".into());
         let e = c.validate().expect_err("wrong scheme should not pass");
         assert!(e.to_string().contains("DATABASE_URL"));
+    }
+
+    #[test]
+    fn an_implausible_spread_or_fee_is_refused() {
+        let mut c = valid();
+        c.half_spread_bps = 5_000; // 50% a side
+        assert!(c.validate().is_err());
+
+        let mut c = valid();
+        c.fee_cents = 1_000_000; // 10,000 USD a trade
+        assert!(c.validate().is_err());
+
+        // The configured values of C-19 must still pass.
+        let mut c = valid();
+        c.half_spread_bps = 5;
+        c.fee_cents = 100;
+        assert!(c.validate().is_ok());
+    }
+
+    #[test]
+    fn a_zero_chat_cap_is_refused() {
+        // Zero would read as "capped" while actually meaning "off", and F-53 asks for a cap
+        // with a clear message, not a silently dead feature.
+        let mut c = valid();
+        c.chat_cap_per_day = 0;
+        assert!(c.validate().is_err());
     }
 
     #[test]

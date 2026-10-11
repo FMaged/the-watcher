@@ -86,10 +86,12 @@ impl PriceSource for YahooPriceSource {
             to.to_unix_midnight() + 86_400
         );
 
-        let mut last = FetchError::Transport;
+        // Every branch below returns, so there is no fallback after the loop. An earlier
+        // version kept a `last` error and ended with `Err(last)`, which was unreachable and
+        // read as though it were the real failure path.
         for attempt in 1..=MAX_ATTEMPTS {
             match self.attempt(&url).await {
-                Ok(body) => return parse_chart(&body),
+                Ok(body) => return parse_chart(&body).map(|f| f.within(from, to)),
                 Err(e) => {
                     // I-12: retried, then recorded as a failed fetch. A parse error or an
                     // unknown symbol will not change on a second ask, so it stops here
@@ -101,11 +103,10 @@ impl PriceSource for YahooPriceSource {
                     // anything cleverer, and a tight loop against someone else's free
                     // endpoint is how access gets withdrawn.
                     tokio::time::sleep(Duration::from_millis(500 * u64::from(attempt))).await;
-                    last = e;
                 }
             }
         }
-        Err(last)
+        unreachable!("the loop returns on every path")
     }
 }
 
@@ -280,6 +281,9 @@ mod tests {
         );
 
         let bar = f.bars[0];
+        // Pinned, because a later test reasons about which day survives clamping and it is
+        // easy to assume the wrong one: the second entry (2026-10-08) is the null close.
+        assert_eq!(bar.day.to_string(), "2026-10-07");
         assert_eq!(bar.open, Money::from_minor(24150));
         assert_eq!(bar.high, Money::from_minor(24390));
         assert_eq!(bar.low, Money::from_minor(24005));
@@ -347,6 +351,37 @@ mod tests {
         let f = parse_chart(body).unwrap();
         assert!(f.bars.is_empty());
         assert_eq!(f.skipped, 0);
+    }
+
+    #[test]
+    fn bars_outside_the_requested_range_are_dropped() {
+        // The request sends `to + 1 day` because the endpoint's end is exclusive. If that
+        // ever returns a day past `to`, it must not be stored as though it were asked for.
+        let f = parse_chart(BODY).unwrap();
+        assert_eq!(f.bars.len(), 1);
+
+        // The surviving bar is 2026-10-07, so the range has to end before it. My first
+        // version of this test ended at 10-07 and expected the bar gone, having assumed the
+        // good bar was the second entry — it is the first.
+        let from = TradingDay::from_ymd(2026, 10, 1).unwrap();
+        let to = TradingDay::from_ymd(2026, 10, 6).unwrap();
+        let clamped = f.within(from, to);
+        assert_eq!(
+            clamped.bars.len(),
+            0,
+            "2026-10-07 is past the requested end"
+        );
+        assert_eq!(clamped.skipped, 2, "the dropped bar is counted, not lost");
+    }
+
+    #[test]
+    fn a_bar_inside_the_range_survives_clamping() {
+        let f = parse_chart(BODY).unwrap();
+        let from = TradingDay::from_ymd(2026, 10, 1).unwrap();
+        let to = TradingDay::from_ymd(2026, 10, 31).unwrap();
+        let clamped = f.within(from, to);
+        assert_eq!(clamped.bars.len(), 1);
+        assert_eq!(clamped.skipped, 1);
     }
 
     #[test]

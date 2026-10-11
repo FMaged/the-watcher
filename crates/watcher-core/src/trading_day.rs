@@ -89,9 +89,18 @@ impl FromStr for TradingDay {
         if b.len() != 10 || b[4] != b'-' || b[7] != b'-' {
             return Err(InvalidTradingDay);
         }
-        let num = |range: std::ops::Range<usize>| -> Result<i32, InvalidTradingDay> {
-            s[range].parse::<i32>().map_err(|_| InvalidTradingDay)
+        // Every non-separator byte must be a digit, checked before parsing. `parse::<i32>()`
+        // accepts a leading sign, which let "2026-+1-09" through as 2026-01-09 and
+        // "-026-10-09" through as year -26. The earlier test for nonsense passed anyway,
+        // which is the part worth remembering: the hole was in what the test did not try.
+        let digits_only = |range: std::ops::Range<usize>| -> Result<i32, InvalidTradingDay> {
+            let part = s.get(range).ok_or(InvalidTradingDay)?;
+            if !part.bytes().all(|b| b.is_ascii_digit()) {
+                return Err(InvalidTradingDay);
+            }
+            part.parse::<i32>().map_err(|_| InvalidTradingDay)
         };
+        let num = digits_only;
         let year = num(0..4)?;
         let month = u8::try_from(num(5..7)?).map_err(|_| InvalidTradingDay)?;
         let day = u8::try_from(num(8..10)?).map_err(|_| InvalidTradingDay)?;
@@ -135,6 +144,13 @@ mod tests {
             "2026-10-09T00:00:00Z",
             "not a date",
             "26-10-09",
+            // Signed components. `parse::<i32>()` accepts these, so they have to be
+            // excluded before it ever runs.
+            "+026-10-09",
+            "-026-10-09",
+            "2026-+1-09",
+            "2026-10-+9",
+            "2026--1-09",
         ] {
             assert_eq!(
                 s.parse::<TradingDay>(),

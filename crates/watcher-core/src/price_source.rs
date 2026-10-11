@@ -58,6 +58,22 @@ pub struct Fetched {
     pub skipped: usize,
 }
 
+impl Fetched {
+    /// Drop anything outside the range that was asked for, counting it as skipped.
+    ///
+    /// Providers are asked for a closed range and are trusted to honour it, which is a
+    /// trust nothing enforces. The free endpoint takes an exclusive end, so the request
+    /// sends `to + 1 day` — and an off-by-one at the provider, or a change to how it reads
+    /// that parameter, would quietly store a bar for a day nobody asked about. Clamping here
+    /// means every implementation gets the guarantee rather than each remembering it.
+    pub fn within(mut self, from: TradingDay, to: TradingDay) -> Self {
+        let before = self.bars.len();
+        self.bars.retain(|b| b.day >= from && b.day <= to);
+        self.skipped += before - self.bars.len();
+        self
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum FetchError {
     /// The provider was reachable but said no. Retrying may help.

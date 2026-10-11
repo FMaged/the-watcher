@@ -119,7 +119,7 @@ decision log needs. Integrity is covered by a `CHECK` on `subject_kind` plus the
 | `app_user` | owner of a watchlist and portfolio. **One row in v1** | `id` | update | D-1 |
 | `api_token` | hashed MCP token. Never stored in clear | `id` | update, delete | F-92, N-41 |
 | `instrument` | validated tickers, US-listed only | `id` | update | F-1, C-11 |
-| `watchlist_item` | ticker on a watchlist, with `removed_on` | `(user, instrument)` | update | F-1, F-3 |
+| `watchlist_item` | one *membership period* per row, so add/remove/re-add keeps all three | `(user, instrument, added_on)` | update | F-1, F-3 |
 | `trading_calendar` | US sessions and half-days, 2026–2030 | `cal_date` | seed only | D-15 |
 | `price_bar` | **raw** daily OHLCV. Never adjusted | `(instrument, bar_date)` | insert | I-11, D-7 |
 | `corporate_action` | splits and dividends, with pay dates | `id` | insert | F-70, F-71 |
@@ -152,6 +152,11 @@ Opaque ULIDs stored as `text`, with a three-character type prefix — `rn_`, `as
 Where a natural key exists it is used instead, and there is no surrogate id at all:
 `price_bar`, `snapshot`, `position`, `benchmark_basket`, `watchlist_item`,
 `trading_calendar`. One fewer column and one fewer way to insert a duplicate.
+
+The two seeded rows — the single v1 user and their portfolio — use all-zero ids of the right
+length (`us_` plus 26 characters). They sort before any real ULID, which is correct for the
+first rows, and they would survive a format check if one is ever added. See `REVIEW.md`,
+finding 6.
 
 ## What is deliberately absent
 

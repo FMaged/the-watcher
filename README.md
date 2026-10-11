@@ -167,6 +167,7 @@ Read in this order. Where they disagree, the one higher in this list wins.
 | [`PLAN.md`](PLAN.md) | How it is built, and why each decision was made over the alternatives |
 | [`doc/`](doc/README.md) | Diagrams, the schema in detail, how a day passes |
 | [`TASKS.md`](TASKS.md) | The build order, and notes on what actually happened |
+| [`REVIEW.md`](REVIEW.md) | Review findings and what was done about each |
 
 ## Licence
 
