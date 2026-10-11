@@ -319,12 +319,49 @@ to drive it — T1.11. The trait uses `impl Future` rather than `dyn`, which is 
 two implementations are chosen by config and an enum in feeds will dispatch between them in
 T1.9.
 
-### [ ] T1.9: Paid PriceSource implementation, left unconfigured
+### [x] T1.9: Paid PriceSource implementation, left unconfigured
 **What:** A second implementation behind the same trait, selected by `PRICE_SOURCE`.
 **Why:** `PLAN.md` D15. §11 needs 14 *consecutive* days; a free endpoint breaking on day
 nine means starting the count again. Written now, the swap is one environment variable.
 **How:** Same trait, no other code aware of which is live. Do not configure it.
-**Notes:** _(added after implementation)_
+**Notes:** Done. `TiingoPriceSource` beside the free one, `ConfiguredPriceSource` choosing
+between them from `PRICE_SOURCE`, 21 tests in feeds. Verified that the swap really is
+configuration: no crate outside `watcher-feeds` mentions either provider by name, checked by
+grep over every other crate rather than asserted.
+
+**Honest limit, and it is recorded in the file itself: this is unverified against the live
+API.** It is written from Tiingo's documented response shape and there is no key here, which
+is the point of leaving it unconfigured. What contains the risk is that the parser fails the
+same loud way the free one does — a changed shape is a non-retryable `Unreadable`, never an
+empty result — so if the shape is wrong the first real call says so plainly instead of
+recording a successful fetch of nothing. Confirm it against a real key before relying on it.
+
+**The adjusted-close trap has a test.** Tiingo returns `adjClose` alongside the raw close, and
+reading it would be the I-11 failure — adjusted prices are recomputed on every split, so
+storing one silently rewrites what the chart showed last month. The fixture sets `adjClose` to
+half the raw close, and the test asserts no field holds that value, so a future "helpful"
+change to read the adjusted field fails a test instead of quietly corrupting history.
+
+**Two decisions worth naming.** The token goes in an `Authorization` header, not the query
+string — a token in a URL ends up in access logs and in any error that quotes the URL, which
+is the slow way to leak a credential (N-40). And `ConfiguredPriceSource` has a hand-written
+`Debug` that prints only the provider name: deriving it would have put the token in every log
+line, panic message and test failure that printed the source. There is a test that the token
+does not appear.
+
+**The paid source refuses to start without a key** rather than failing on first use, with an
+empty or whitespace key counting as absent. The alternative is discovering it on the first
+nightly run after someone flips `PRICE_SOURCE` — which is the night it matters. Config gained
+`PRICE_API_KEY` as the first genuinely optional variable, with an `optional()` helper that
+treats `KEY=` and an omitted line identically, because deployment tooling writes both and
+treating them differently means one of them fails unpredictably.
+
+**Not wired into `main` yet, deliberately.** Startup validation of the key would mean either
+teaching `config` the provider names — duplicating knowledge that belongs in feeds — or making
+`main` depend on `watcher-feeds`, which changes the documented dependency graph. The right
+moment is T1.11, when the nightly job needs a source constructed and `main` becomes a real
+composition root. Until then `ConfiguredPriceSource::from_config` is the only thing that knows
+the names, and it is tested.
 
 ### [ ] T1.10: Watchlist endpoints
 **What:** `GET`/`POST`/`DELETE /api/watchlist`.

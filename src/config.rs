@@ -21,6 +21,9 @@ pub struct Config {
     pub model_api_key: Secret,
 
     pub price_source: String,
+    /// Only the paid source needs one, and that source is deliberately not configured
+    /// (`PLAN.md` D15), so this is absent in the normal case.
+    pub price_api_key: Option<Secret>,
     pub news_source: String,
 
     /// N-30, checked before a run starts rather than after it finishes (N-34).
@@ -47,6 +50,7 @@ impl Config {
             model_api_key: Secret(required("MODEL_API_KEY")?),
 
             price_source: required("PRICE_SOURCE")?,
+            price_api_key: optional("PRICE_API_KEY")?.map(Secret),
             news_source: required("NEWS_SOURCE")?,
 
             daily_cost_cap_cents: parsed("DAILY_COST_CAP_CENTS")?,
@@ -122,6 +126,7 @@ impl fmt::Debug for Config {
             .field("model_base_url", &self.model_base_url)
             .field("model_api_key", &self.model_api_key)
             .field("price_source", &self.price_source)
+            .field("price_api_key", &self.price_api_key)
             .field("news_source", &self.news_source)
             .field("daily_cost_cap_cents", &self.daily_cost_cap_cents)
             .field("chat_cap_per_day", &self.chat_cap_per_day)
@@ -154,6 +159,20 @@ impl fmt::Display for ConfigError {
 }
 
 impl std::error::Error for ConfigError {}
+
+/// A variable that may legitimately be absent.
+///
+/// An empty value counts as absent. Deployment tooling writes `KEY=` for "not set" more often
+/// than it omits the line, and treating those differently means one of them fails in a way
+/// nobody predicted.
+fn optional(key: &'static str) -> Result<Option<String>, ConfigError> {
+    match env::var(key) {
+        Ok(v) if v.trim().is_empty() => Ok(None),
+        Ok(v) => Ok(Some(v)),
+        Err(VarError::NotPresent) => Ok(None),
+        Err(VarError::NotUnicode(_)) => Err(ConfigError::NotUnicode(key)),
+    }
+}
 
 fn required(key: &'static str) -> Result<String, ConfigError> {
     match env::var(key) {
@@ -215,6 +234,7 @@ mod tests {
             model_base_url: "https://example.invalid".into(),
             model_api_key: Secret("sk-secret-key".into()),
             price_source: "free".into(),
+            price_api_key: None,
             news_source: "none".into(),
             daily_cost_cap_cents: 100,
             chat_cap_per_day: 50,
@@ -240,6 +260,7 @@ mod tests {
             model_base_url: "https://example.invalid".into(),
             model_api_key: Secret("sk-secret-key".into()),
             price_source: "free".into(),
+            price_api_key: None,
             news_source: "none".into(),
             daily_cost_cap_cents: 100,
             chat_cap_per_day: 50,
@@ -269,6 +290,30 @@ mod tests {
         assert!(c.validate().is_err());
         c.annotation_warn_pct = 101;
         assert!(c.validate().is_err());
+    }
+
+    #[test]
+    fn an_absent_or_blank_optional_reads_as_none() {
+        // A unique name so this cannot race another test. Deployment tooling writes `KEY=`
+        // for "not set" at least as often as it omits the line, so both must mean the same
+        // thing — otherwise one of them fails in a way nobody predicted.
+        const KEY: &str = "WATCHER_TEST_OPTIONAL_ONE";
+        assert_eq!(optional(KEY).unwrap(), None);
+        std::env::set_var(KEY, "");
+        assert_eq!(optional(KEY).unwrap(), None);
+        std::env::set_var(KEY, "   ");
+        assert_eq!(optional(KEY).unwrap(), None);
+        std::env::set_var(KEY, "a-value");
+        assert_eq!(optional(KEY).unwrap().as_deref(), Some("a-value"));
+        std::env::remove_var(KEY);
+    }
+
+    #[test]
+    fn a_blank_required_variable_is_missing_rather_than_empty() {
+        const KEY: &str = "WATCHER_TEST_REQUIRED_ONE";
+        std::env::set_var(KEY, "  ");
+        assert!(matches!(required(KEY), Err(ConfigError::Missing(_))));
+        std::env::remove_var(KEY);
     }
 
     #[test]
