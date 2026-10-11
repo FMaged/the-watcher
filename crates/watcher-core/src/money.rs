@@ -72,6 +72,60 @@ impl Money {
     }
 }
 
+/// Parse a decimal string such as `"24.31"` into minor units.
+///
+/// This exists because market data arrives as JSON numbers, and the obvious conversion —
+/// `(value * 100.0).round()` — routes every price in the system through an `f64`. For the
+/// magnitudes involved that happens to be accurate, but "happens to be accurate" is not the
+/// standard a ledger that cannot be edited should be held to (D-3). Parsing the decimal text
+/// directly means no float is ever constructed.
+///
+/// More than two decimal places are rounded half away from zero, which matches how the
+/// half-spread rounds: a fraction of a cent is never rounded out of existence.
+pub fn minor_from_decimal_str(s: &str) -> Option<i64> {
+    let s = s.trim();
+    let (negative, digits) = match s.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, s.strip_prefix('+').unwrap_or(s)),
+    };
+    if digits.is_empty() {
+        return None;
+    }
+
+    let (whole, frac) = match digits.split_once('.') {
+        Some((w, f)) => (w, f),
+        None => (digits, ""),
+    };
+    // "24." and ".31" are both accepted; "" is not, and neither is "1.2.3".
+    if whole.is_empty() && frac.is_empty() {
+        return None;
+    }
+    if !whole.bytes().all(|b| b.is_ascii_digit()) || !frac.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+
+    let mut minor: i64 = if whole.is_empty() {
+        0
+    } else {
+        whole.parse::<i64>().ok()?.checked_mul(SCALE)?
+    };
+
+    let mut frac_digits = frac.bytes().map(|b| i64::from(b - b'0'));
+    let tenths = frac_digits.next().unwrap_or(0);
+    let hundredths = frac_digits.next().unwrap_or(0);
+    minor = minor.checked_add(tenths * 10 + hundredths)?;
+
+    // Round on the third decimal place, away from zero.
+    if frac_digits.next().is_some_and(|d| d >= 5) {
+        minor = minor.checked_add(1)?;
+    }
+
+    if negative {
+        minor = minor.checked_neg()?;
+    }
+    Some(minor)
+}
+
 impl fmt::Display for Money {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Via i128 because (i64::MIN).abs() overflows.
@@ -179,6 +233,63 @@ mod tests {
                     "{minor} at {bps}bps rounded down to {cost}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn decimal_text_becomes_minor_units_without_a_float() {
+        for (text, want) in [
+            ("24.31", 2431),
+            ("24.3", 2430),
+            ("24", 2400),
+            ("0.05", 5),
+            ("0", 0),
+            ("0.00", 0),
+            ("24.", 2400),
+            (".31", 31),
+            ("-24.31", -2431),
+            ("+24.31", 2431),
+            (" 24.31 ", 2431),
+            ("1234567.89", 123456789),
+        ] {
+            assert_eq!(minor_from_decimal_str(text), Some(want), "{text:?}");
+        }
+    }
+
+    #[test]
+    fn a_third_decimal_place_rounds_away_from_zero() {
+        // Sub-cent prices are real. Rounding them down would quietly lose value on every
+        // bar; rounding away from zero is the same direction the half-spread takes.
+        assert_eq!(minor_from_decimal_str("24.315"), Some(2432));
+        assert_eq!(minor_from_decimal_str("24.314"), Some(2431));
+        assert_eq!(minor_from_decimal_str("24.319"), Some(2432));
+        assert_eq!(minor_from_decimal_str("-24.315"), Some(-2432));
+        assert_eq!(minor_from_decimal_str("0.005"), Some(1));
+        assert_eq!(minor_from_decimal_str("0.004"), Some(0));
+    }
+
+    #[test]
+    fn the_float_route_is_wrong_on_real_prices() {
+        // Not every price breaks: 24.31 * 100.0 is exactly 2431.0. The ones that break are
+        // the reason this parser exists, and they are ordinary prices, not contrived ones.
+
+        // 1.15 * 100.0 is 114.99999999999999. Truncating loses a cent.
+        assert_eq!((1.15_f64 * 100.0) as i64, 114);
+        assert_eq!(minor_from_decimal_str("1.15"), Some(115));
+
+        // 8.165 * 100.0 is 816.4999999999999, so even rounding gives 816 — while decimal
+        // rounding half away from zero gives 817. Adding .round() does not save the float
+        // route, it just moves which prices are wrong.
+        assert_eq!((8.165_f64 * 100.0).round() as i64, 816);
+        assert_eq!(minor_from_decimal_str("8.165"), Some(817));
+    }
+
+    #[test]
+    fn nonsense_decimals_are_refused_rather_than_guessed() {
+        for text in [
+            "", " ", "-", "+", ".", "abc", "1.2.3", "1,5", "24.3a", "1e5", "NaN",
+        ] {
+            assert_eq!(minor_from_decimal_str(text), None, "{text:?}");
         }
     }
 

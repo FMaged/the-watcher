@@ -264,12 +264,60 @@ original row untouched on a second insert, which is the nightly ingest pattern (
 exactly right for data that is fetched once and never revised. Nothing here goes on 0009's
 grant list.
 
-### [ ] T1.8: PriceSource trait and the free implementation
+### [x] T1.8: PriceSource trait and the free implementation
 **What:** The trait in `watcher-core`, a free-source implementation in `watcher-feeds`.
 **Why:** A-1, `PLAN.md` D15.
 **How:** Retry, then record a failed fetch (I-12). It must never write a partial or guessed
 bar. `watcher-feeds` touches nothing to do with orders, analyses or pages (N-54).
-**Notes:** _(added after implementation)_
+**Notes:** Done. `PriceSource` in core, `YahooPriceSource` in feeds, 44 tests across the two
+crates, clippy clean. Verified against the live endpoint once: ten real AAPL bars for
+2026-09-28 to 10-09, none skipped, all coherent, and an unknown symbol returns
+`UnknownSymbol`. `cargo run -p watcher-feeds --example probe` repeats that — kept deliberately,
+because "has the unofficial endpoint changed shape?" is a risk the brief names and this is how
+you answer it in one command.
+
+**The float problem, which I had not expected to be real.** Prices arrive as JSON numbers, and
+the obvious conversion is `(value * 100.0).round()`. So core got
+`minor_from_decimal_str`, which parses the decimal text and never constructs a float. Writing
+the test for it, my first premise was wrong — I claimed `24.31 * 100.0` was inexact, and it is
+exactly `2431.0`. The cases that actually break are ordinary: `1.15 * 100.0` is
+`114.99999999999999`, which truncates to **114**, a cent lost; and `8.165 * 100.0` is
+`816.4999999999999`, so even adding `.round()` gives 816 where decimal rounding gives 817.
+Adding `.round()` does not fix the float route, it only changes which prices are wrong. The
+test now pins both.
+
+`serde_json::Number`'s `Display` is the shortest text that round-trips the value, so a
+response carrying `24.31` yields exactly `"24.31"` and the integer conversion is exact — no
+need for the `arbitrary_precision` feature.
+
+**Parsing is separated from fetching**, so every shape this endpoint can return is testable
+without a network. That matters more than usual because the shape is promised to nobody: a
+changed response must be a distinct, non-retryable `Unreadable` error and never an empty
+result, because an empty result would make the nightly job record success with no bars — a
+silently dying provider that looks like a quiet market. Five malformed shapes are covered.
+
+**Null days are dropped and counted, never interpolated** (`Fetched.skipped`). An invented bar
+is exactly the guessed data I-12 forbids, and the count is how a degrading provider becomes
+visible (N-61). Incoherent bars — high below low — are skipped here as well as refused by the
+`price_bar` constraints; the duplication is deliberate, since the database makes it impossible
+and this makes the failure legible (I-3).
+
+**Retries respect whether asking again could help.** `FetchError::is_retryable` is false for a
+parse error and an unknown symbol, so the budget is not spent on a response that will not
+change. Three attempts, linear backoff, 15-second timeout.
+
+**One boundary fix.** My first version had `watcher-feeds` reaching for the `time` crate to
+convert Unix timestamps. That is core's job — it owns the date type — so `TradingDay` gained
+`to_unix_midnight` and `from_unix_seconds`, and no provider implementation needs a date
+library of its own. `cargo tree` confirms feeds depends only on reqwest, serde, serde_json,
+tokio and core, and core still has only `thiserror` and `time`. Clippy also caught an `if`
+whose two branches returned the same error — written as though I would distinguish timeout
+from connect failure, then not doing so. Removed, with a comment on why they collapse.
+
+**Not done:** nothing calls this yet. There is no store to write bars into and no nightly job
+to drive it — T1.11. The trait uses `impl Future` rather than `dyn`, which is fine because the
+two implementations are chosen by config and an enum in feeds will dispatch between them in
+T1.9.
 
 ### [ ] T1.9: Paid PriceSource implementation, left unconfigured
 **What:** A second implementation behind the same trait, selected by `PRICE_SOURCE`.

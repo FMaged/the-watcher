@@ -10,12 +10,14 @@
 //! append-only ledger that cannot be edited afterwards.
 
 pub mod money;
+pub mod price_source;
 pub mod shares;
 pub mod side;
 pub mod ticker;
 pub mod trading_day;
 
-pub use money::{Money, SCALE};
+pub use money::{minor_from_decimal_str, Money, SCALE};
+pub use price_source::{DailyBar, FetchError, Fetched, PriceSource};
 pub use shares::Shares;
 pub use side::{InvalidSide, Side};
 pub use ticker::{InvalidTicker, Ticker};

@@ -28,6 +28,7 @@ Early. The planning documents are complete and the first three tasks are done.
 | T1.5 | Core types: money, trading days, tickers, sides, shares |
 | T1.6 | Core tables and the seeded 2026-2030 trading calendar |
 | T1.7 | Market data tables: prices, corporate actions, news |
+| T1.8 | PriceSource trait and the free implementation |
 
 **What the binary does today:** reads its configuration, validates it, prints one line and
 exits. There is no HTTP server yet (T1.9), no database schema (T1.4) and no agent (Stage 2).

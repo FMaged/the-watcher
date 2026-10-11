@@ -34,7 +34,26 @@ impl TradingDay {
         let (y, m, d) = self.0.to_calendar_date();
         (y, m as u8, d)
     }
+
+    /// Midnight UTC on this day, as Unix seconds.
+    ///
+    /// Providers take and return Unix timestamps. The conversion lives here rather than in
+    /// `watcher-feeds` so that no provider implementation needs a date library of its own —
+    /// which is also what keeps the dependency graph one-way (N-54).
+    pub fn to_unix_midnight(self) -> i64 {
+        i64::from(self.0.to_julian_day() - UNIX_EPOCH_JULIAN) * SECONDS_PER_DAY
+    }
+
+    /// The UTC calendar day a Unix timestamp falls on.
+    pub fn from_unix_seconds(seconds: i64) -> Option<Self> {
+        let days = seconds.div_euclid(SECONDS_PER_DAY);
+        let julian = i32::try_from(days).ok()?.checked_add(UNIX_EPOCH_JULIAN)?;
+        Date::from_julian_day(julian).ok().map(Self)
+    }
 }
+
+const UNIX_EPOCH_JULIAN: i32 = 2_440_588;
+const SECONDS_PER_DAY: i64 = 86_400;
 
 impl fmt::Display for TradingDay {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -123,6 +142,33 @@ mod tests {
                 "{s:?} should not parse"
             );
         }
+    }
+
+    #[test]
+    fn unix_timestamps_round_trip_through_days() {
+        let d = TradingDay::from_ymd(2026, 10, 9).unwrap();
+        assert_eq!(TradingDay::from_unix_seconds(d.to_unix_midnight()), Some(d));
+        // The epoch itself, and a timestamp partway through a day.
+        assert_eq!(
+            TradingDay::from_unix_seconds(0).unwrap().to_string(),
+            "1970-01-01"
+        );
+        assert_eq!(
+            TradingDay::from_unix_seconds(d.to_unix_midnight() + 13 * 3600)
+                .unwrap()
+                .to_string(),
+            "2026-10-09"
+        );
+    }
+
+    #[test]
+    fn timestamps_before_the_epoch_still_land_on_the_right_day() {
+        // div_euclid rather than integer division: -1 second is the day *before* the epoch,
+        // not the epoch itself, and truncating division would get that wrong.
+        assert_eq!(
+            TradingDay::from_unix_seconds(-1).unwrap().to_string(),
+            "1969-12-31"
+        );
     }
 
     #[test]
